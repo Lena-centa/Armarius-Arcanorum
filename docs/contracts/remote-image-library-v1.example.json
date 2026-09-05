@@ -1,0 +1,47 @@
+{
+  "batch_key": "remote:example-batch-001",
+  "captured_at": "2026-08-24T08:00:00.000Z",
+  "created_date": "2026-08-24",
+  "created_hour": 8,
+  "created_weekday": 0,
+  "recipe_key": "recipe:remote-example",
+  "model": { "base_model": "example-model.safetensors" },
+  "loras": { "count": 0, "names": [], "items": [] },
+  "prompts": {
+    "positive": [{ "text": "example remote image" }],
+    "negative": [],
+    "search_text": "example remote image"
+  },
+  "samplers": [],
+  "latent": { "width": 1024, "height": 1536, "batch_size": 1 },
+  "batch_count": 1,
+  "images": [
+    {
+      "captured_at": "2026-08-24T08:00:00.000Z",
+      "created_date": "2026-08-24",
+      "created_hour": 8,
+      "created_weekday": 0,
+      "file": {
+        "filename": "remote-example.png",
+        "image_name": "remote-example",
+        "extension": ".png",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_bytes": 123456,
+        "format": "PNG",
+        "mode": "RGB",
+        "width": 1024,
+        "height": 1536
+      },
+      "source": {
+        "instance_id": "my-remote-library",
+        "base_url": "https://images.example.com",
+        "protocol": "wfdb-image-library-v1",
+        "asset_id": "albums/2026/remote-example.png"
+      },
+      "metadata": {
+        "raw_keys": [],
+        "extra": { "imported_by": "my-remote-library" }
+      }
+    }
+  ]
+}

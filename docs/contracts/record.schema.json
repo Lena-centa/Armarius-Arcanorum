@@ -1,0 +1,372 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowDB Record",
+  "description": "Single source of truth for image record data contract between NestJS gateway and Python workers. WorkflowIR is an internal, non-persisted graph and does not add record fields.",
+  "type": "object",
+  "definitions": {
+    "linkValue": {
+      "description": "parser.py resolve_input_value() passthrough: literal number/string, or unresolvable node-reference object ({ node_id, class_type, inputs })",
+      "type": ["number", "string", "object"]
+    },
+    "imageSource": {
+      "description": "Image owner or remote image library locator. Missing protocol means legacy wfdb-gateway-v1.",
+      "type": ["object", "null"],
+      "properties": {
+        "instance_id": { "type": "string" },
+        "base_url": { "type": "string" },
+        "protocol": {
+          "type": "string",
+          "enum": ["wfdb-gateway-v1", "wfdb-image-library-v1"]
+        },
+        "asset_id": { "type": "string" }
+      }
+    },
+    "remoteImageFile": {
+      "description": "File summary for a remote image library entry; no local resolved_path is required.",
+      "type": "object",
+      "properties": {
+        "filename": { "type": "string" },
+        "image_name": { "type": "string" },
+        "extension": { "type": "string" },
+        "sha256": { "type": "string" },
+        "size_bytes": { "type": "integer" },
+        "format": { "type": ["string", "null"] },
+        "mode": { "type": ["string", "null"] },
+        "width": { "type": ["integer", "null"] },
+        "height": { "type": ["integer", "null"] }
+      },
+      "required": ["filename", "sha256"]
+    }
+  },
+  "properties": {
+    "captured_at": { "type": "string", "format": "date-time" },
+    "batch_key": {
+      "type": "string",
+      "description": "批次键:seed 序列 + 尺寸指纹(latent 优先,缺失时 file 实测像素),如 seed:70928044177154@864x1440"
+    },
+    "created_date": { "type": "string" },
+    "created_hour": { "type": "integer" },
+    "created_weekday": { "type": "integer" },
+    "file": {
+      "type": "object",
+      "properties": {
+        "filename": { "type": "string" },
+        "image_name": { "type": "string" },
+        "extension": { "type": "string" },
+        "relative_path": { "type": "string" },
+        "source_path": { "type": "string" },
+        "resolved_path": { "type": "string" },
+        "windows_path": { "type": ["string", "null"] },
+        "size_bytes": { "type": "integer" },
+        "mtime": { "type": "number" },
+        "mtime_ns": { "type": "integer" },
+        "sha256": { "type": "string" },
+        "format": { "type": ["string", "null"] },
+        "mode": { "type": ["string", "null"] },
+        "width": { "type": ["integer", "null"] },
+        "height": { "type": ["integer", "null"] }
+      },
+      "required": ["filename", "resolved_path"]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "raw_keys": { "type": "array", "items": { "type": "string" } },
+        "raw_prompt": { "type": ["string", "null"] },
+        "raw_workflow": { "type": ["string", "null"] },
+        "raw_parameters": { "type": ["string", "null"] },
+        "raw_novelai": {
+          "type": ["string", "null"],
+          "description": "NovelAI Comment 元数据原文(parse_worker 层 novelai 适配器注入,非 parser.py 产物;见 docs/parser/NOVELAI_SUPPORT.md)"
+        },
+        "extra": {
+          "type": ["object", "string", "null"],
+          "description": "其余原始元数据; malformed 值为兼容性透传"
+        },
+        "extra_diagnostics": {
+          "type": "object",
+          "description": "parse-worker sidecars; preserves adapter evidence and diagnostics",
+          "additionalProperties": { "type": "object" },
+          "properties": {
+            "parse_diagnostics": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string" },
+                "sources": { "type": "array", "items": { "type": "string" } },
+                "empty_fields": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "issues": { "type": "array", "items": { "type": "object" } },
+                "chunk_offsets": { "type": "object" }
+              },
+              "required": [
+                "status",
+                "sources",
+                "empty_fields",
+                "issues",
+                "chunk_offsets"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "has_embedded_workflow": { "type": "boolean" },
+        "prompt_node_count": { "type": "integer" },
+        "workflow_node_count": { "type": ["integer", "null"] },
+        "node_type_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "base_model": {
+          "anyOf": [{ "$ref": "#/definitions/linkValue" }, { "type": "null" }]
+        },
+        "checkpoint_node_id": { "type": ["string", "null"] },
+        "sampler_model_source_id": { "type": ["string", "null"] },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "node_id": { "type": "string" },
+              "node_type": { "type": "string" },
+              "ckpt_name": { "$ref": "#/definitions/linkValue" },
+              "unet_name": { "$ref": "#/definitions/linkValue" },
+              "model_name": { "$ref": "#/definitions/linkValue" },
+              "vae_name": { "$ref": "#/definitions/linkValue" },
+              "clip_name": { "$ref": "#/definitions/linkValue" }
+            }
+          }
+        }
+      }
+    },
+    "loras": {
+      "type": "object",
+      "properties": {
+        "count": { "type": "integer" },
+        "names": { "type": "array", "items": { "type": "string" } },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "node_id": { "type": "string" },
+              "source": { "type": "string" },
+              "name": { "type": "string" },
+              "strength_model": { "$ref": "#/definitions/linkValue" },
+              "strength_clip": { "$ref": "#/definitions/linkValue" },
+              "slot": { "type": "integer" },
+              "strength": { "$ref": "#/definitions/linkValue" }
+            }
+          }
+        },
+        "model_source_hint": { "type": ["string", "null"] }
+      }
+    },
+    "prompts": {
+      "type": "object",
+      "properties": {
+        "positive": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "layers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "layer_index": { "type": "integer" },
+                    "text": { "type": "string" },
+                    "lines": { "type": "array", "items": { "type": "string" } },
+                    "tokens": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              },
+              "source_node_id": { "type": ["string", "null"] },
+              "source_node_type": { "type": ["string", "null"] },
+              "branch_label": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "negative": {
+          "type": "array",
+          "items": { "$ref": "#/properties/prompts/properties/positive/items" }
+        },
+        "by_sampler": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "node_id": { "type": "string" },
+              "node_type": { "type": "string" },
+              "positive": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/properties/prompts/properties/positive/items"
+                }
+              },
+              "negative": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/properties/prompts/properties/positive/items"
+                }
+              }
+            }
+          }
+        },
+        "search_text": { "type": "string" }
+      }
+    },
+    "samplers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "node_id": { "type": "string" },
+          "node_type": { "type": "string" },
+          "seed": { "$ref": "#/definitions/linkValue" },
+          "seed_source": {
+            "description": "seed 输入连线的来源节点(provenance,2026-08-11);仅 seed 经连线传入时存在",
+            "type": "object",
+            "properties": {
+              "node_id": { "type": "string" },
+              "node_type": { "type": "string" }
+            }
+          },
+          "steps": { "$ref": "#/definitions/linkValue" },
+          "cfg": { "$ref": "#/definitions/linkValue" },
+          "sampler_name": { "$ref": "#/definitions/linkValue" },
+          "scheduler": { "$ref": "#/definitions/linkValue" },
+          "denoise": { "$ref": "#/definitions/linkValue" },
+          "noise_seed": {
+            "description": "KSamplerAdvanced 独立噪声种子(2026-08-11);仅输入存在时产出",
+            "$ref": "#/definitions/linkValue"
+          }
+        }
+      }
+    },
+    "latent": {
+      "type": "object",
+      "properties": {
+        "node_id": { "type": "string" },
+        "node_type": { "type": "string" },
+        "width": { "$ref": "#/definitions/linkValue" },
+        "height": { "$ref": "#/definitions/linkValue" },
+        "batch_size": { "$ref": "#/definitions/linkValue" },
+        "empty_latent_width": { "$ref": "#/definitions/linkValue" },
+        "empty_latent_height": { "$ref": "#/definitions/linkValue" },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "node_id": { "type": "string" },
+              "node_type": { "type": "string" },
+              "width": { "$ref": "#/definitions/linkValue" },
+              "height": { "$ref": "#/definitions/linkValue" },
+              "batch_size": { "$ref": "#/definitions/linkValue" }
+            }
+          }
+        }
+      }
+    },
+    "recipe_key": { "type": "string" },
+    "image_refs": { "type": "array", "items": { "type": "string" } },
+    "_image_refs_up_to_date": { "type": "boolean" },
+    "images": {
+      "description": "batch 文档的 image entry 数组(ingest/archive 层组装,非 parser 单图产物)。source 为多网关共享库打标(instance_id + base_url),透传定位图片持有网关",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "captured_at": { "type": "string", "format": "date-time" },
+          "created_date": { "type": "string" },
+          "created_hour": { "type": "integer" },
+          "created_weekday": { "type": "integer" },
+          "file": {
+            "anyOf": [
+              { "$ref": "#/properties/file" },
+              { "$ref": "#/definitions/remoteImageFile" }
+            ]
+          },
+          "metadata": { "$ref": "#/properties/metadata" },
+          "workflow": { "$ref": "#/properties/workflow" },
+          "source": { "$ref": "#/definitions/imageSource" }
+        },
+        "required": ["file"],
+        "anyOf": [
+          {
+            "properties": {
+              "file": { "$ref": "#/properties/file" }
+            }
+          },
+          {
+            "properties": {
+              "file": { "$ref": "#/definitions/remoteImageFile" },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "protocol": { "const": "wfdb-image-library-v1" }
+                },
+                "required": ["protocol"]
+              }
+            },
+            "required": ["source"]
+          }
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "protocol": { "const": "wfdb-image-library-v1" }
+                  },
+                  "required": ["protocol"]
+                }
+              },
+              "required": ["source"]
+            },
+            "then": {
+              "properties": {
+                "file": { "$ref": "#/definitions/remoteImageFile" },
+                "source": {
+                  "allOf": [
+                    { "$ref": "#/definitions/imageSource" },
+                    {
+                      "required": [
+                        "instance_id",
+                        "base_url",
+                        "protocol",
+                        "asset_id"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "batch_key",
+    "created_date",
+    "created_hour",
+    "created_weekday",
+    "file"
+  ]
+}

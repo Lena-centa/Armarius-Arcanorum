@@ -1,0 +1,799 @@
+/*
+ * 主页面专属 MD3 视觉层
+ * 作用域: 仅限本页组件(.results-table, .basic-cell, .thumb-link, .prompt-cell,
+ *        .pagination-bar, .filter-fields, #resultsList, .sync-notice, .summary-drawer),
+ *        共享组件在 styles.css 中统一维护。
+ *
+ * 密度约束: 表格正文保持 13px; 控件最小高度约 36px; 筛选区 Grid 不动;
+ *   首页首屏行数不得减少; 不静默裁切 Prompt。
+ * 禁止: 改动 HTML 结构、ID、class 或 data 属性; 改动 JS。
+ * 窄屏(<=720px): 表格经 .table-wrap 显式横向滚动; 导航不得遮挡正文。
+ */
+
+/* 1. 缩略图按钮:2px 工控微倒角;hover 用 line-strong 边框 */
+.thumb-link {
+  border-radius: var(--radius);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.thumb-link:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.thumb-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 2. Layer 标签:元信息标签(表面色 + 细边框 + muted),字号保持 11px 不变 */
+.prompt-layer-label {
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+
+/* 3. 复制按钮:state layer hover,保持 11px 紧凑 */
+.prompt-layer-copy {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 1px 5px;
+  cursor: pointer;
+  transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.prompt-layer-copy:hover,
+.prompt-layer-copy:focus-visible {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--row-hover);
+}
+
+/* 4. 批次元信息:统一 12px muted,文件名下方层次用 margin 收紧 */
+.batch-summary {
+  margin-top: 4px;
+}
+
+.batch-files {
+  margin-top: 2px;
+}
+
+/* 5. 分页 secondary 按钮 disabled 对比度(仅 :disabled,不影响 enabled) */
+.pagination-actions .action.secondary:disabled {
+  opacity: 0.35;
+  background: var(--surface);
+  color: var(--muted);
+  border-color: var(--line);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* 6. 摘要抽屉:保持 26px 紧凑 */
+.summary-toggle:active {
+  background: var(--state-pressed);
+}
+
+/* 7. 筛选区标签 */
+.filters .field label {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Prompt 是首页主信息:分支、Layer 元信息与正文形成稳定的阅读轨道。 */
+.results-table .prompt-cell {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.results-table .prompt-entry {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.results-table .prompt-cell--positive .prompt-entry {
+  border-left-color: #3d7d49;
+  background: #f4f7f5;
+  box-shadow: none;
+}
+
+[data-theme="dark"] .results-table .prompt-cell--positive .prompt-entry {
+  border-left-color: #385e42;
+  border-color: #242c26;
+  background: #181b19;
+}
+
+.results-table .prompt-cell--negative .prompt-entry {
+  border-left-color: #8c3f3f;
+  background: #f8f4f4;
+  box-shadow: none;
+}
+
+[data-theme="dark"] .results-table .prompt-cell--negative .prompt-entry {
+  border-left-color: #6e3838;
+  border-color: #2c2424;
+  background: #1b1717;
+}
+
+.results-table .prompt-entry-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: inherit;
+}
+
+/* 折叠/展开:entry 头部(toggle + label 同行) */
+.results-table .prompt-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 整体折叠按钮(prompt-entry 级)*/
+.results-table .prompt-entry-toggle,
+.results-table .prompt-layer-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+  user-select: none;
+}
+
+.results-table .prompt-entry-toggle:hover,
+.results-table .prompt-entry-toggle:focus-visible,
+.results-table .prompt-layer-toggle:hover,
+.results-table .prompt-layer-toggle:focus-visible {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--row-hover);
+}
+
+/* 折叠态:隐藏 prompt-entry-body(整体折叠) */
+.results-table .prompt-entry.is-collapsed > .prompt-entry-body {
+  display: none;
+}
+
+/* 折叠态:隐藏 prompt-pre(单行/layer 折叠) */
+.results-table .prompt-layer.is-collapsed > .prompt-pre {
+  display: none;
+}
+
+.results-table .prompt-cell--negative .prompt-entry-label {
+  color: var(--muted);
+}
+
+.results-table .prompt-layer {
+  display: grid;
+  grid-template-columns: 1fr;
+  row-gap: 3px;
+  margin: 0;
+  padding-top: 3px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.results-table .prompt-entry-body > .prompt-layer:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.results-table .prompt-layer-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.results-table .prompt-layer-copy,
+.results-table .prompt-layer-label {
+  white-space: nowrap;
+}
+
+.results-table .prompt-layer-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  padding: 0 4px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+}
+
+.results-table .prompt-pre {
+  color: var(--text);
+  line-height: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-rendering: optimizeLegibility;
+}
+
+.results-table .prompt-cell--negative .prompt-pre {
+  color: var(--muted);
+}
+
+[data-theme="dark"] .results-table .prompt-cell--negative .prompt-pre {
+  color: #b8c0cc;
+}
+
+/* 9. 窄屏:页面级横向溢出防护,表格容器显式横向滚动 */
+@media (max-width: 720px) {
+  .table-wrap {
+    overflow-x: auto;
+  }
+}
+
+/* ===== flatpickr 主题:无机质紧凑风,随页面深浅色主题自动切换 =====
+ * 作用域:仅 index.html(唯一加载 flatpickr 的页面);随页面深浅色主题自动切换。
+ * 加载顺序保证:index.html 中 flatpickr.min.css → styles.css → index.css,
+ * 本块位于 index.css 末尾,必然覆盖 vendor 默认样式,不依赖 link 顺序契约。 */
+.flatpickr-calendar {
+  width: 336px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px;
+}
+
+.flatpickr-calendar.hasTime .flatpickr-time {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+
+/* 隐藏定位箭头(纯面板) */
+.flatpickr-calendar:before,
+.flatpickr-calendar:after {
+  display: none;
+}
+
+/* 月份导航:紧凑、强调月份 */
+.flatpickr-months .flatpickr-month {
+  height: 40px;
+}
+
+.flatpickr-current-month {
+  font-size: 13px;
+  line-height: 1;
+  height: 40px;
+  padding-top: 12px;
+}
+
+.flatpickr-current-month span.cur-month,
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.flatpickr-current-month input.cur-year {
+  font-weight: 400;
+}
+
+.flatpickr-current-month .numInputWrapper {
+  width: 6ch;
+}
+
+.flatpickr-prev-month,
+.flatpickr-next-month {
+  height: 40px;
+  padding: 12px;
+  fill: var(--muted);
+  color: var(--muted);
+}
+
+.flatpickr-months .flatpickr-prev-month:hover,
+.flatpickr-months .flatpickr-next-month:hover {
+  color: var(--accent);
+  fill: var(--accent);
+}
+
+.flatpickr-months .flatpickr-prev-month:hover svg,
+.flatpickr-months .flatpickr-next-month:hover svg {
+  fill: var(--accent);
+}
+
+.flatpickr-monthDropdown-months:hover,
+.numInputWrapper:hover {
+  background: var(--surface);
+}
+
+.numInputWrapper span {
+  border-color: var(--line);
+}
+
+.numInputWrapper span:hover {
+  background: var(--surface);
+}
+
+.numInputWrapper span.arrowUp:after {
+  border-bottom-color: var(--muted);
+}
+
+.numInputWrapper span.arrowDown:after {
+  border-top-color: var(--muted);
+}
+
+/* 周标题:弱化小字 */
+.flatpickr-weekdays {
+  width: 100%;
+  height: 30px;
+}
+
+.flatpickr-weekdays .flatpickr-weekday {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 日期格:方形圆角、紧凑、平滑过渡 */
+.flatpickr-day {
+  max-width: none;
+  height: 36px;
+  line-height: 36px;
+  border-radius: 4px;
+  color: var(--text);
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.flatpickr-day:hover,
+.flatpickr-day:focus {
+  background: var(--surface);
+  border-color: var(--surface);
+  color: var(--text);
+}
+
+/* 今天:accent 描边不填充 */
+.flatpickr-day.today {
+  border-color: var(--accent);
+}
+
+.flatpickr-day.today:hover,
+.flatpickr-day.today:focus {
+  background: var(--surface);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* 选中:accent 填充 + 对比色 */
+.flatpickr-day.selected,
+.flatpickr-day.selected:hover,
+.flatpickr-day.selected:focus,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: none;
+}
+
+/* 邻月/禁用:弱化 */
+.flatpickr-day.prevMonthDay,
+.flatpickr-day.nextMonthDay {
+  color: var(--muted);
+}
+
+.flatpickr-day.prevMonthDay:hover,
+.flatpickr-day.nextMonthDay:hover {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.flatpickr-day.flatpickr-disabled {
+  color: var(--muted);
+}
+
+/* 时间区:独立的紧凑编辑带，避免和月历网格混成一块。 */
+.flatpickr-calendar.hasTime .flatpickr-time {
+  display: grid;
+  grid-template-columns: 32px 68px 12px 68px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 54px;
+  max-height: 54px;
+  padding: 8px 10px;
+  line-height: normal;
+  box-sizing: border-box;
+  background: var(--surface-container-low);
+}
+
+.flatpickr-time::before {
+  content: "时间";
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.flatpickr-calendar.hasTime .flatpickr-time.time24hr .numInputWrapper {
+  height: 36px;
+  width: 68px;
+  min-width: 68px;
+  margin: 0;
+  float: none;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--input-bg);
+  box-sizing: border-box;
+}
+
+.flatpickr-time input {
+  display: block;
+  width: 100%;
+  height: 34px;
+  padding: 0 22px 0 10px;
+  font-size: 15px;
+  color: var(--text);
+  line-height: 34px;
+}
+
+.flatpickr-time input.flatpickr-hour {
+  font-weight: 600;
+}
+
+.flatpickr-time input:hover,
+.flatpickr-time input:focus {
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.flatpickr-calendar.hasTime .flatpickr-time .flatpickr-time-separator,
+.flatpickr-time .flatpickr-am-pm {
+  width: 12px;
+  height: 36px;
+  margin: 0;
+  float: none;
+  line-height: 36px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.date-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.date-picker-footer button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.date-picker-footer-clear {
+  background: transparent;
+  border-color: var(--line) !important;
+  color: var(--muted);
+}
+
+.date-picker-footer-done {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* UI 优化轮(T-002):主列表标题区"归档库"来源徽标。
+ * 包装层保持 .panel-head 两个 flex 子项不变,既有布局零改动。 */
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--surface-container);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Narrow-screen result composition. Desktop keeps the existing fixed-layout
+ * four-column table; <=720px reads as one record card per batch. */
+@media (max-width: 720px) {
+  .filters--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .filters--compact .filter-filename,
+  .filters--compact .filter-model,
+  .filters--compact .filter-lora,
+  .filters--compact .filter-exclude-lora,
+  .filters--compact .filter-from-date,
+  .filters--compact .filter-to-date,
+  .filters--compact .filter-page-size,
+  .filters--compact .filter-favorite {
+    grid-column: span 1;
+  }
+
+  .filters--compact .filter-favorite-category,
+  .filters--compact .filter-views,
+  .filters--compact .filter-actions,
+  .filters--compact .sync-notice {
+    grid-column: 1 / -1;
+  }
+
+  .filters--compact .filter-actions {
+    justify-content: stretch;
+  }
+
+  .filters--compact .filter-actions .action {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .filters--compact .field > label {
+    display: flex;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .filters--compact .lora-andor {
+    flex: 0 0 auto;
+  }
+
+  .filters--compact .filter-views-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .split-workspace {
+    min-width: 0;
+    padding-bottom: 58px;
+  }
+
+  .flatpickr-calendar {
+    width: min(336px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+  }
+}
+
+/* The desktop table stops being a table below 1200px. Tablet widths use a
+   two-column record card; mobile overrides the same card to one column. */
+@media (max-width: 1199px) {
+  .main-pane,
+  .main-pane > .panel,
+  #resultsList,
+  .table-wrap {
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .results-table,
+  .results-table thead,
+  .results-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .results-table {
+    min-width: 0;
+    table-layout: auto;
+    border-collapse: separate;
+  }
+
+  .results-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .results-table tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .results-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(240px, 30%) minmax(220px, 25%) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .results-table tbody tr:nth-child(even) {
+    background: var(--panel);
+  }
+
+  .results-table td {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .results-table td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    border-right: 1px solid var(--line-soft);
+  }
+
+  .results-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    border-right: 1px solid var(--line-soft);
+  }
+
+  .results-table td:nth-child(3) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .results-table td:nth-child(4) {
+    grid-column: 3;
+    grid-row: 2;
+    border-bottom: 0;
+  }
+
+  .results-table td:not(.basic-cell)::before {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .results-table td:nth-child(2)::before {
+    content: "模型 / LoRA / Sampler / Latent";
+  }
+
+  .results-table td:nth-child(3)::before {
+    content: "正向 Prompt";
+  }
+
+  .results-table td:nth-child(4)::before {
+    content: "负向 Prompt";
+  }
+
+  .results-table .thumb-wrap,
+  .results-table .thumb-link {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .results-table .thumb-link img {
+    max-height: 320px;
+  }
+
+  .results-table .prompt-cell {
+    overflow: auto;
+  }
+
+  /* 动态高度分配策略由 balancePromptHeights() 精确接管(空间充足二者完全展开,空间受限 7/3 分);
+   * 静态样式保留 28em : 12em (7:3) 作为初始化与静态回退上限 */
+  .results-table .prompt-cell--positive {
+    max-height: 28em;
+  }
+
+  .results-table .prompt-cell--negative {
+    max-height: 12em;
+  }
+
+  .results-table .prompt-entry {
+    padding: 7px 8px;
+  }
+
+  .results-table .meta-stack,
+  .results-table .meta-block,
+  .results-table .meta-block > div,
+  .results-table .chip {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 899px) {
+  .results-table tbody tr {
+    grid-template-columns: minmax(240px, 36%) minmax(0, 1fr);
+  }
+
+  .results-table td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .results-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    border-right: 0;
+  }
+
+  .results-table td:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .results-table td:nth-child(4) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+}
+
+@media (max-width: 720px) {
+  .results-table tbody {
+    gap: 10px;
+  }
+
+  .results-table tbody tr {
+    display: block;
+  }
+
+  .results-table td,
+  .results-table td:nth-child(1),
+  .results-table td:nth-child(2),
+  .results-table td:nth-child(3),
+  .results-table td:nth-child(4) {
+    display: block;
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .results-table td:nth-child(4) {
+    border-bottom: 0;
+  }
+
+  .results-table .thumb-link img {
+    max-height: 280px;
+  }
+
+  .results-table .prompt-cell {
+    max-height: 15em;
+  }
+}

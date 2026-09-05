@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("aa-theme") || window.localStorage.getItem("wfdb-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {}
+      })();
+    </script>
+    <title>Armarius Arcanorum - Labels</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260824-narrow3" />
+    <link rel="stylesheet" href="/static/labels.css?v=20260824-narrow3" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar topbar--nav-only">
+        <div class="tool-switcher">
+          <a class="tool-link" href="/">图片库</a>
+          <a class="tool-link" href="/generate">生成</a>
+          <a class="tool-link" href="/stats">统计</a>
+          <a class="tool-link is-active" href="/labels">标注库</a>
+          <a class="tool-link" href="/settings">设置</a>
+          <button id="themeToggleBtn" class="tool-toggle theme-toggle" type="button" aria-label="切换深浅色主题" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+          <button id="summaryToggleBtn" class="summary-toggle" type="button" aria-expanded="false" aria-label="展开/收起状态摘要" title="状态摘要">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="summary-drawer" id="summaryDrawer">
+        <div class="summary-popover" id="summaryPopover" hidden>
+          <div class="summary-row">
+            <div class="summary-card">
+              <span class="summary-label">标注数量</span>
+              <strong id="labelTotal">0</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">当前分类</span>
+              <strong id="labelCategorySummary">全部</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="filters">
+        <div class="field filter-category">
+          <label for="labelCategoryFilter">分类</label>
+          <select id="labelCategoryFilter">
+            <option value="">全部分类</option>
+          </select>
+        </div>
+        <div class="field filter-lora">
+          <label for="labelLoraFilter">LoRA</label>
+          <input id="labelLoraFilter" type="text" list="labelLoraOptions" placeholder="输入 LoRA 名称筛选" />
+        </div>
+        <div class="field filter-keywords">
+          <label for="labelSearchInput">关键词</label>
+          <input id="labelSearchInput" type="text" placeholder="搜索名称、prompt、备注" />
+        </div>
+        <div class="field filter-date">
+          <label for="labelFromFilter">起始日期</label>
+          <input id="labelFromFilter" type="date" />
+        </div>
+        <div class="field filter-date">
+          <label for="labelToFilter">结束日期</label>
+          <input id="labelToFilter" type="date" />
+        </div>
+        <div class="actions filter-actions">
+          <button id="labelSearchBtn" class="action" type="button">查询</button>
+        </div>
+      </section>
+
+      <section class="panel category-manager">
+        <div class="panel-head">
+          <h2>分类管理</h2>
+          <span id="categoryCount" class="muted"></span>
+        </div>
+        <div id="categoryChips" class="category-chips"></div>
+        <div class="category-add-row">
+          <input id="categoryKeyInput" type="text" placeholder="分类标识 key(字母/数字/_/-)" autocomplete="off" />
+          <input id="categoryLabelInput" type="text" placeholder="显示名称" autocomplete="off" />
+          <button id="categoryAddBtn" class="action" type="button">新增分类</button>
+        </div>
+        <div class="category-hint muted">删除分类前需先清理该分类下的标注;有标注的分类会拒绝删除。</div>
+      </section>
+
+      <datalist id="labelLoraOptions"></datalist>
+
+      <main class="label-layout">
+        <section class="panel label-editor-panel">
+          <div class="panel-head">
+            <h2>标注</h2>
+            <button id="labelResetBtn" class="action secondary" type="button">新建</button>
+          </div>
+          <input id="labelIdInput" type="hidden" />
+          <div class="label-editor-grid">
+            <div class="field">
+              <label for="labelNameInput">名称</label>
+              <input id="labelNameInput" type="text" placeholder="例如：某角色基础触发词" />
+            </div>
+            <div class="field">
+              <label for="labelCategoryInput">分类</label>
+              <select id="labelCategoryInput"></select>
+            </div>
+            <div class="field label-editor-wide">
+              <label for="labelLoraPickerInput">LoRA</label>
+              <div class="label-lora-picker">
+                <div class="label-lora-search-row">
+                  <input id="labelLoraPickerInput" type="text" placeholder="输入 LoRA 名称筛选" autocomplete="off" />
+                  <button id="labelLoraAddBtn" class="action secondary" type="button">添加</button>
+                </div>
+                <div id="labelLoraMatches" class="label-lora-matches"></div>
+                <div class="label-lora-sync-help muted">
+                  添加图片引用时会自动合并该图片关联的 LoRA；移除图片引用不会自动删除 LoRA。
+                </div>
+                <div id="selectedLabelLoras" class="selected-label-loras"></div>
+              </div>
+            </div>
+            <div class="field label-editor-wide">
+              <label for="labelPromptsInput">Prompt 片段</label>
+              <textarea id="labelPromptsInput" rows="7" placeholder="每行一个 prompt 片段"></textarea>
+            </div>
+            <div class="field label-editor-wide">
+              <label for="labelNoteInput">备注</label>
+              <textarea id="labelNoteInput" rows="5"></textarea>
+            </div>
+          </div>
+
+          <div class="image-ref-toolbar">
+            <div class="field">
+              <label for="imageRefSearchInput">图片引用</label>
+              <input
+                id="imageRefSearchInput"
+                type="text"
+                placeholder="输入文件名、路径或 SHA-256"
+                autocomplete="off"
+                spellcheck="false"
+                aria-describedby="imageRefSearchHelp"
+              />
+              <div id="imageRefSearchHelp" class="image-ref-search-help">
+                支持文件名（含不带扩展名）、完整/部分路径和 SHA-256，不区分大小写；路径可混用 / 与 \。
+                同名图片会显示各自路径，同一引用的重复记录会自动折叠。
+              </div>
+            </div>
+            <button id="imageRefSearchBtn" class="action secondary" type="button">搜索图片</button>
+          </div>
+          <div id="imageRefSearchStatus" class="image-ref-search-status muted" aria-live="polite"></div>
+          <div id="imageRefResults" class="image-ref-results"></div>
+          <div id="selectedImageRefs" class="selected-image-refs"></div>
+
+          <div class="label-editor-actions">
+            <button id="labelSaveBtn" class="action" type="button">保存标注</button>
+            <button id="labelDeleteBtn" class="action danger" type="button" disabled>删除</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>标注列表</h2>
+            <span id="labelResultCount" class="muted"></span>
+          </div>
+          <div id="labelList" class="label-list"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/common.js?v=20260829-fehard"></script>
+    <script src="/static/labels.js?v=20260824-ref2"></script>
+  </body>
+</html>

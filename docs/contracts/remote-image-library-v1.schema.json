@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://workflow-db.local/schemas/remote-image-library-v1.schema.json",
+  "title": "WorkflowDB Remote Image Library v1 Image Entry",
+  "description": "An images[] entry backed by an HTTP image library. It can be stored in a MongoDB batch document without a local resolved_path.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "captured_at": { "type": "string", "format": "date-time" },
+    "created_date": { "type": "string" },
+    "created_hour": { "type": "integer", "minimum": 0, "maximum": 23 },
+    "created_weekday": { "type": "integer", "minimum": 0, "maximum": 6 },
+    "file": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "filename": { "type": "string", "minLength": 1 },
+        "image_name": { "type": "string" },
+        "extension": { "type": "string" },
+        "sha256": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable public lookup key used by /api/image/:sha256 and /api/thumb/:sha256. A real content SHA-256 is recommended."
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "format": { "type": ["string", "null"] },
+        "mode": { "type": ["string", "null"] },
+        "width": { "type": ["integer", "null"], "minimum": 1 },
+        "height": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "required": ["filename", "sha256"]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable library identifier used for filtering and diagnostics."
+        },
+        "base_url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "HTTP(S) origin of the image library. URL paths are intentionally ignored by the gateway."
+        },
+        "protocol": { "const": "wfdb-image-library-v1" },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque library-owned identifier. The gateway URL-encodes it as one path segment."
+        }
+      },
+      "required": ["instance_id", "base_url", "protocol", "asset_id"]
+    },
+    "metadata": { "type": "object" },
+    "workflow": { "type": "object" }
+  },
+  "required": ["file", "source"]
+}

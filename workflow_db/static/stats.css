@@ -1,0 +1,164 @@
+/*
+ * 统计页专属 MD3 视觉层
+ * 作用域: 仅限本页组件(.stats-layout, .stats-panel-wide, .stats-table-wrap,
+ *        .stats-table, #statsLoraFrequency, .stats-pre, .toggle-field,
+ *        .filter-group, #statsFocusLoraCombo), 共享组件在 styles.css 中统一维护。
+ *
+ * 密度约束: 表格正文保持 13px; 控件最小高度约 36px; 筛选区字段组合不变;
+ *   三张统计表布局与顺序不变; #statsLoraFrequency 限高滚动保留。
+ * 禁止: 改动 HTML 结构、ID、class 或 data 属性; 改动 JS。
+ * 窄屏: 双栏 stats-layout 在 <=1400px 已折叠为单列。
+ */
+
+/* ============================================================
+ * MD3 本页追加(增量覆盖,不删除共享规则)
+ * ============================================================ */
+
+/* 任务2:stats-pre 等宽还原。
+ * 共享规则(styles.css).stats-pre 的 `font: inherit` 会覆盖 <pre> 原生等宽,
+ * 本规则仅补回等宽字族;字号随表格正文保持 13px(inherit),满足 12-13px 约束。 */
+.stats-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* 任务3:质量控制词 checkbox。
+ * 共享规则已给文字 13px muted;MD3 选中态使用 primary 色(MD3 Switch/Checkbox 选中
+ * 语义色),补齐 accent-color,与页面其余选中态(.inline-toggle)一致。 */
+.toggle-field input {
+  accent-color: var(--accent);
+}
+
+/* 任务4:筛选区字段标签。
+ * 共享规则仅给 .field label 颜色未给字号(默认继承 16px);按 MD3 紧凑 Label
+ * 角色(UI_UPDATE_GUIDE §4.4)压到 12px,输入框 min-height 36px 由共享规则保持。 */
+.filters .field label {
+  font-size: 12px;
+}
+
+/* 任务7:窄屏防御。
+ * 表头 sticky/斑马纹/hover 与 .stats-table-wrap 横向滚动均已在 styles.css 生效;
+ * 此处仅兜底:限制本页两列布局与表格滚动容器不超出视口,确保页面级无横向溢出,
+ * 横向滚动只发生在 .stats-table-wrap 内容区内。 */
+@media (max-width: 720px) {
+  .stats-layout,
+  .stats-layout > .panel,
+  .stats-table-wrap {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filters .filter-lora,
+  .filters .filter-model,
+  .filters .filter-actions,
+  .filters .filter-toggle {
+    grid-column: 1 / -1;
+  }
+
+  .filters .filter-from-date,
+  .filters .filter-to-date,
+  .filters .filter-page-size {
+    grid-column: span 1;
+  }
+
+  .filters .filter-actions .action {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  #statsFocusLoraCombo,
+  #statsModelCombobox {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 24px;
+    align-items: stretch;
+  }
+
+  #statsFocusLoraCombo > input,
+  #statsModelCombobox > input {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  #statsFocusLoraCombo > .combo-toggle,
+  #statsModelCombobox > .combo-toggle {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  #statsFocusLoraCombo > .combo-menu,
+  #statsModelCombobox > .combo-menu {
+    grid-column: 1 / -1;
+  }
+
+  .stats-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .stats-panel-wide {
+    grid-column: auto;
+  }
+
+  .stats-table {
+    min-width: 480px;
+  }
+
+  .stats-table-wrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1199px) {
+  .filters {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .filters .filter-lora,
+  .filters .filter-model,
+  .filters .filter-from-date,
+  .filters .filter-to-date {
+    grid-column: span 3;
+  }
+
+  .filters .filter-page-size,
+  .filters .filter-actions,
+  .filters .filter-toggle {
+    grid-column: span 2;
+  }
+
+  #statsFocusLoraCombo,
+  #statsModelCombobox {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 24px;
+    align-items: stretch;
+  }
+
+  #statsFocusLoraCombo > input,
+  #statsModelCombobox > input {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  #statsFocusLoraCombo > .combo-toggle,
+  #statsModelCombobox > .combo-toggle {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  #statsFocusLoraCombo > .combo-menu,
+  #statsModelCombobox > .combo-menu {
+    grid-column: 1 / -1;
+  }
+
+  .stats-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stats-panel-wide {
+    grid-column: auto;
+  }
+}

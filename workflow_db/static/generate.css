@@ -1,0 +1,197 @@
+/*
+ * 生成页专属 MD3 视觉层
+ * 作用域: 仅限本页组件(.generate-layout, .generate-section, .generate-card,
+ *        .generate-grid, .generate-fields, .status-chip, .generate-fab),
+ *        共享组件在 styles.css 中统一维护。
+ *
+ * 密度约束: 控件最小高度约 36px; 节点编辑卡片保持字段组合与分组结构。
+ * 禁止: 改动 HTML 结构、ID、class 或 data 属性; 改动 JS。
+ * 窄屏(<=720px): 侧栏移到主内容下方; FAB 与队列浮层不互相遮挡。
+ */
+
+/* ---------------------------------------------------------------------
+ * MD3 P2:生成页增量覆盖(仅追加,不改动上方既有规则与共享样式)
+ * ------------------------------------------------------------------- */
+
+/* 2) 编辑卡片 focus-within:卡片内任一可编辑控件获得焦点时,
+ *    卡片边框转为 primary outline 并叠加 focus ring,
+ *    MD3 Focus State Layer——键盘焦点不只靠输入框自身变色提示。 */
+.generate-card:focus-within {
+  border-color: var(--accent-outline);
+  box-shadow: var(--shadow-sm), 0 0 0 3px var(--accent-ring);
+}
+
+/* 4) LoRA combo 菜单 elevation:菜单为绝对定位的 Elevated Menu,
+ *    提升到本页固定层(FAB z-60 / 队列浮层 z-59)之上,展开时不被遮挡;
+ *    卡片与区块无 overflow 裁剪,无需改 HTML。 */
+.generate-lora-combo .combo-menu {
+  z-index: var(--z-combo-raise);
+}
+
+/* 6) FAB 文字:固定宽度下禁止折行,队列计数(「队列 3」)与
+ *    「开始生成」在窄屏 100% 宽与桌面 min-width 下均不裁切。 */
+.generate-fab {
+  white-space: nowrap;
+}
+
+/* 7) 队列浮层与 FAB 分离(桌面):FAB 栈高约 100px(含 bottom 28px),
+ *    原 bottom 92px 会被 FAB 上缘覆盖约 36px;
+ *    抬升到 FAB 顶部之上留出安全间距。窄屏 bottom 136px 已让位,保持不动。 */
+@media (min-width: 721px) {
+  .generate-queue-float {
+    bottom: 148px;
+  }
+}
+
+/* 9) 空态/错误态文本完整性:初始化失败、Service Unavailable 等长错误
+ *    消息由 JS 写入 .generate-editor(无独立错误 class,契约不可改),
+ *    保证长串(URL、连接错误)换行显示、不静默裁切。 */
+.generate-editor.empty {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 10) 窄屏:FAB 全宽贴底,编辑器最后一个字段需能滚动到 FAB 之上;
+ *      仅底部预留滚动空间,不改网格/字段布局;空态(无来源)不受影响。 */
+@media (max-width: 720px) {
+  .generate-editor:not(.empty) {
+    padding-bottom: 132px;
+  }
+}
+
+/* UI 优化轮(T-002):预览弹窗标题下"即时结果"徽标行。
+ * 与既有 #generatePreviewMeta 同行排列,互不挤压。 */
+.preview-head-subline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* Real narrow-screen flow: collapse the fixed history column, keep the editor
+ * first in document order, and reduce the two floating actions to one bar. */
+@media (max-width: 720px) {
+  .generate-source-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .generate-source-bar .field.wide,
+  .generate-source-bar .actions {
+    grid-column: 1 / -1;
+  }
+
+  .generate-source-bar .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .generate-source-bar .action {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+  }
+
+  .generate-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .generate-main,
+  .generate-history-panel {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .generate-main {
+    order: 1;
+  }
+
+  .generate-history-panel {
+    order: 2;
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .generate-section {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .generate-source-card,
+  .generate-history-batch,
+  .generate-history-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .generate-source-card img,
+  .generate-history-thumb {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .generate-row,
+  .generate-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .generate-editor:not(.empty) {
+    padding-bottom: 72px;
+  }
+
+  .generate-fab-stack {
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    grid-template-columns: minmax(88px, 0.35fr) minmax(0, 1fr);
+    gap: 8px;
+    justify-items: stretch;
+  }
+
+  .generate-fab,
+  .generate-fab-submit {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px 12px;
+  }
+
+  .generate-queue-float {
+    left: 8px;
+    right: 8px;
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 68vh;
+    padding: 12px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1199px) {
+  .generate-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .generate-main,
+  .generate-history-panel {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .generate-history-panel {
+    position: static;
+    top: auto;
+    max-height: none;
+  }
+
+  .generate-history-panel .generate-history-batch {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .generate-history-panel .generate-history-thumb {
+    width: 220px;
+  }
+}

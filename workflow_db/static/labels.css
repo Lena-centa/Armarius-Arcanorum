@@ -1,0 +1,461 @@
+/*
+ * 标注库页专属 MD3 视觉层
+ * 作用域: 仅限本页组件(.label-layout, .label-editor-panel, .label-editor-grid,
+ *        .label-lora-match, .selected-label-loras, .label-item, .label-note,
+ *        .label-ref-strip, .image-ref-item, .label-editor-actions, .label-list),
+ *        共享组件在 styles.css 中统一维护。
+ *
+ * 密度约束: 编辑器字段与左栏保持现有组合; LoRA 匹配列表可滚动限高。
+ * 禁止: 改动 HTML 结构、ID、class 或 data 属性; 改动 JS。
+ * 窄屏(<=720px): label-layout 已单列; 底部操作不遮挡表单。
+ */
+
+/* ===========================================================================
+ * MD3 视觉改造(labels 页专属增量覆盖,P3)
+ * 原则:只增量覆盖,不删除 styles.css 任何既有规则;只引用已定义 Token;
+ *   控件最小高度、字段组合、sticky 左栏、LoRA 匹配列表限高均保持不变。
+ * ========================================================================= */
+
+/* ---- 1. LoRA 候选项:.label-lora-match ------------------------------- */
+/* MD3 §4.3:交互项用 8%/12% primary state layer,而非填满 container 色;
+   圆角取蓝本 radius-sm(8px),padding 保持紧凑(7px 8px)不放大。 */
+.label-lora-match {
+  border-radius: 8px;
+  transition: background-color var(--transition), color var(--transition);
+}
+
+.label-lora-match:hover,
+.label-lora-match:focus-visible {
+  background: var(--state-hover);
+  color: var(--text);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.label-lora-match:active {
+  background: var(--state-pressed);
+}
+
+/* ---- 2. 已选 LoRA Chip:.label-lora-chip ----------------------------- */
+/* 共享 info-bg/info-line 已映射 primary-container,保持 12px 紧凑形态;
+   长名 ellipsis 依赖 chip min-width:0 + span 溢出裁剪,补齐 min-width 保证生效。 */
+.label-lora-chip {
+  min-width: 0;
+}
+
+.label-lora-chip button {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transition: background-color var(--transition);
+}
+
+.label-lora-chip button:hover {
+  background: var(--row-hover);
+}
+
+.label-lora-chip button:active {
+  background: var(--accent-soft);
+}
+
+/* ---- 3. 索引卡片:.label-item ----------------------------------------- */
+/* MD3:卡片用 --radius(12px);hover 保留 accent 边框并加过渡 + elevation 提升;
+   内部 chip-list/pre/note 按 Metadata 层级(11-12px)收敛,pre 用等宽语义色。 */
+.label-item {
+  border-radius: var(--radius);
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+.label-item:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.label-item:active {
+  transform: translateY(1px);
+}
+
+.label-item .stats-pre {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.label-item .label-lora-match {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.label-item .label-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- 4. 图片引用条:.label-ref-strip ---------------------------------- */
+/* 横向滚动保留;图片 72px/6px 圆角不动;补 flex-shrink:0 保证多图时真正滚动;
+   hover 轻微边框 + 阴影提升(不改变布局尺寸)。 */
+.label-ref-strip img {
+  flex-shrink: 0;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.label-ref-strip img:hover {
+  border-color: var(--accent-outline);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- 5. 图片搜索:结果 / 已选 chip ------------------------------------- */
+/* 结果项 hover 用 state layer(focus 带 ring);已选项以 tonal container
+   (accent-soft)区分形态,内部 muted 换 accent-text 保证对比度。 */
+.image-ref-result,
+.image-ref-chip {
+  border-radius: 8px;
+  transition: background-color var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+
+.image-ref-result:hover,
+.image-ref-result:focus-visible {
+  background: var(--state-hover);
+  border-color: var(--accent-outline);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.image-ref-result:active {
+  background: var(--state-pressed);
+}
+
+.image-ref-chip {
+  border-color: var(--chip-line);
+  background: var(--accent-soft);
+}
+
+.image-ref-chip .muted {
+  color: var(--accent-text);
+}
+
+/* 移除按钮沿用 .action.secondary(tonal),确认主次即可 */
+
+/* ---- 6. 编辑器底部操作:.label-editor-actions -------------------------- */
+/* 主次:保存 = Filled(.action)、删除 = Error(.danger)、新建 = Tonal(.secondary);
+   加分隔线与最小宽度强化层级,不改变按钮语义类。 */
+.label-editor-actions {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.label-editor-actions .action {
+  min-width: 110px;
+  font-weight: 600;
+}
+
+/* ---- 7. 空态统一 ------------------------------------------------------- */
+/* 索引筛选空态与图片搜索空态:虚线容器卡片,保持紧凑高度;
+   编辑器内"尚未添加 LoRA/图片引用"等 compact 空态去掉大 ∅ 符号,统一成紧凑行。 */
+.image-ref-results .empty,
+.label-list .empty {
+  padding: 24px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-container-low);
+}
+
+.empty.compact {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: left;
+  justify-items: start;
+}
+
+.empty.compact::before {
+  content: none;
+}
+
+/* ---- 8. 窄屏(<=720px)确认:布局已由 styles.css 单列化 ----------------- */
+/* 操作按钮弹性等宽,便于触控;编辑器操作区在正常文档流内,不遮挡任何字段。 */
+@media (max-width: 720px) {
+  .label-editor-actions .action {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/* ===========================================================================
+ * 9. 标注分类管理 + 时间筛选(labels 页专属样式)
+ * ========================================================================= */
+/* ---- 9.1 筛选区 12 列精密对齐 ---- */
+.filters {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 2px);
+  padding: 12px 14px;
+}
+
+.filters .filter-category {
+  grid-column: span 2;
+}
+
+.filters .filter-lora {
+  grid-column: span 2;
+}
+
+.filters .filter-keywords {
+  grid-column: span 3;
+}
+
+.filters .filter-date {
+  grid-column: span 2;
+}
+
+.filters .filter-actions {
+  grid-column: span 1;
+  display: flex;
+  align-items: end;
+}
+
+.filters .filter-actions .action {
+  width: 100%;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.filters .field input,
+.filters .field select {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--input-bg);
+  color: var(--text);
+}
+
+/* ---- 9.2 分类管理面板:芯片与新增行 ---- */
+.category-manager {
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 2px);
+  background: var(--panel);
+  padding: 14px 16px;
+}
+
+.category-manager .panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.category-manager .panel-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.4;
+  transition: border-color var(--transition), background-color var(--transition);
+}
+
+.category-chip:hover {
+  border-color: var(--line-strong);
+}
+
+.category-chip-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.category-chip-key {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-container-high);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.category-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition);
+}
+
+.category-chip button:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.category-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.category-add-row input {
+  flex: 1 1 180px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 12px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.category-add-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+  outline: none;
+}
+
+.category-add-row .action {
+  flex: 0 0 auto;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 14px;
+  font-size: 12px;
+  border-radius: var(--radius-sm, 2px);
+}
+
+.category-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .filters {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .filters .filter-category,
+  .filters .filter-lora,
+  .filters .filter-keywords,
+  .filters .filter-date {
+    grid-column: span 3;
+  }
+  .filters .filter-actions {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 720px) {
+  .category-add-row input,
+  .category-add-row .action {
+    flex: 1 1 100%;
+  }
+
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filters .filter-category,
+  .filters .filter-lora,
+  .filters .filter-date {
+    grid-column: span 1;
+  }
+
+  .filters .filter-keywords,
+  .filters .filter-actions {
+    grid-column: 1 / -1;
+  }
+
+  .filters .filter-actions .action {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .category-manager {
+    padding: 10px;
+  }
+
+  .label-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .label-layout > .panel,
+  .label-editor-panel {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .label-editor-panel {
+    position: static;
+    top: auto;
+  }
+
+  .label-editor-grid,
+  .label-lora-search-row,
+  .image-ref-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .label-editor-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr);
+    gap: 8px;
+  }
+
+  .label-editor-actions .action {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .image-ref-search-help {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1199px) {
+  .label-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .label-editor-panel {
+    position: static;
+    top: auto;
+  }
+}

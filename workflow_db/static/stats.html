@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("aa-theme") || window.localStorage.getItem("wfdb-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {}
+      })();
+    </script>
+    <title>Armarius Arcanorum - Stats</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260824-narrow3" />
+    <link rel="stylesheet" href="/static/stats.css?v=20260824-narrow3" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar topbar--nav-only">
+        <div class="tool-switcher">
+          <a class="tool-link" href="/">图片库</a>
+          <a class="tool-link" href="/generate">生成</a>
+          <a class="tool-link is-active" href="/stats">统计</a>
+          <a class="tool-link" href="/labels">标注库</a>
+          <a class="tool-link" href="/settings">设置</a>
+          <button id="themeToggleBtn" class="tool-toggle theme-toggle" type="button" aria-label="切换深浅色主题" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+          <button id="summaryToggleBtn" class="summary-toggle" type="button" aria-expanded="false" aria-label="展开/收起状态摘要" title="状态摘要">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="summary-drawer" id="summaryDrawer">
+        <div class="summary-popover" id="summaryPopover" hidden>
+          <div class="summary-row">
+            <div class="summary-card">
+              <span class="summary-label">样本</span>
+              <strong id="statsTotalDocs">0</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">焦点 LoRA</span>
+              <strong id="statsFocusDocs">0</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Prompt 层</span>
+              <strong id="statsTargetDocs">0</strong>
+            </div>
+            <div class="summary-card sync-summary-card">
+              <span class="summary-label">数据同步</span>
+              <strong id="syncSummaryState">-</strong>
+              <div id="syncSummaryDetail" class="summary-detail">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="filters">
+        <div class="field filter-lora">
+          <label for="statsFocusLoraInput">焦点 LoRA</label>
+          <div class="combo-box" id="statsFocusLoraCombo">
+            <input id="statsFocusLoraInput" type="text" autocomplete="off" placeholder="选择要分析的 LoRA" />
+            <button id="statsFocusLoraToggle" class="combo-toggle" type="button" aria-label="切换焦点 LoRA 候选列表">▼</button>
+            <div id="statsFocusLoraMenu" class="combo-menu" hidden></div>
+          </div>
+        </div>
+        <div class="field filter-model">
+          <label for="statsModelComboboxInput">基座模型</label>
+          <div class="combo-box" id="statsModelCombobox">
+            <input id="statsModelComboboxInput" type="text" autocomplete="off" placeholder="全部模型" />
+            <button id="statsModelClearBtn" class="combo-clear" type="button" aria-label="清除基座模型筛选" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+            <button id="statsModelComboboxToggle" class="combo-toggle" type="button" aria-label="切换基座模型候选列表">▼</button>
+            <div id="statsModelComboboxMenu" class="combo-menu" hidden></div>
+          </div>
+        </div>
+        <div class="field filter-from-date">
+          <label for="statsFromDate">开始日期</label>
+          <input id="statsFromDate" type="date" data-hint="开始日期" />
+        </div>
+        <div class="field filter-to-date">
+          <label for="statsToDate">结束日期</label>
+          <input id="statsToDate" type="date" data-hint="结束日期" />
+        </div>
+        <div class="field filter-page-size">
+          <label for="statsLimitSelect">条数</label>
+          <select id="statsLimitSelect">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="actions filter-actions">
+          <button id="statsApplyBtn" class="action" type="button">刷新</button>
+        </div>
+        <label class="toggle-field filter-toggle">
+          <input id="statsIncludeQualityToggle" type="checkbox" />
+          <span>含质量控制词</span>
+        </label>
+      </section>
+
+      <main class="stats-layout">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>搭配 LoRA</h2>
+          </div>
+          <div id="statsLoraCooccurrence" class="stats-table-wrap"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>搭配 Prompt</h2>
+          </div>
+          <div id="statsPromptLayers" class="stats-table-wrap"></div>
+        </section>
+        <section class="panel stats-panel-wide">
+          <div class="panel-head">
+            <h2>LoRA 使用频率</h2>
+          </div>
+          <div id="statsLoraFrequency" class="stats-table-wrap"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/common.js?v=20260829-fehard"></script>
+    <script src="/static/stats.js?v=20260829-fehard"></script>
+  </body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("aa-theme") || window.localStorage.getItem("wfdb-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {}
+      })();
+    </script>
+    <title>Armarius Arcanorum - Generate</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260824-narrow3" />
+    <link rel="stylesheet" href="/static/generate.css?v=20260824-narrow3" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar topbar--nav-only">
+        <div class="tool-switcher">
+          <a class="tool-link" href="/">图片库</a>
+          <a class="tool-link is-active" href="/generate">生成</a>
+          <a class="tool-link" href="/stats">统计</a>
+          <a class="tool-link" href="/labels">标注库</a>
+          <a class="tool-link" href="/settings">设置</a>
+          <button id="themeToggleBtn" class="tool-toggle theme-toggle" type="button" aria-label="切换深浅色主题" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+          <button id="summaryToggleBtn" class="summary-toggle" type="button" aria-expanded="false" aria-label="展开/收起状态摘要" title="状态摘要">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="summary-drawer" id="summaryDrawer">
+        <div class="summary-popover" id="summaryPopover" hidden>
+          <div class="summary-row">
+            <div class="summary-card">
+              <span class="summary-label">运行中</span>
+              <strong id="queueRunningCount">0</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">排队中</span>
+              <strong id="queuePendingCount">0</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">队列</span>
+              <button id="queueOpenFromSummary" class="action secondary" type="button">查看完整队列</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="filters generate-source-bar">
+        <div class="field wide">
+          <label for="sourceShaInput">来源图片</label>
+          <input id="sourceShaInput" type="text" placeholder="粘贴 SHA256,从图片库跳转会自动带入" />
+        </div>
+        <div class="actions">
+          <button id="loadSourceBtn" class="action" type="button">载入</button>
+          <button id="submitGenerateInlineBtn" class="action secondary" type="button" disabled>开始生成</button>
+        </div>
+      </section>
+
+      <main class="generate-layout">
+        <section class="panel generate-main">
+          <div class="panel-head">
+            <div>
+              <h2>工作流编辑</h2>
+            </div>
+            <span id="generateSourceMeta" class="muted">未载入来源</span>
+          </div>
+          <div id="generateEditor" class="generate-editor empty">请选择一张图片</div>
+        </section>
+        <section class="panel generate-history-panel">
+          <div class="panel-head">
+            <div>
+              <h2>生成历史</h2>
+            </div>
+            <button id="refreshHistoryBtn" class="action secondary" type="button">刷新</button>
+          </div>
+          <div id="historyPanel" class="stack-list empty">暂无生成记录</div>
+        </section>
+      </main>
+    </div>
+
+    <div class="generate-fab-stack">
+      <button id="queueToggleBtn" class="action secondary generate-fab generate-fab-queue" type="button" aria-expanded="false">
+        队列
+      </button>
+      <button id="submitGenerateBtn" class="action generate-fab generate-fab-submit" type="button" disabled>开始生成</button>
+    </div>
+
+    <section id="queueFloatPanel" class="generate-queue-float" hidden>
+      <div class="panel-head generate-queue-head">
+        <div>
+          <h2>当前队列</h2>
+          <div id="queueSummary" class="muted">当前队列为空</div>
+        </div>
+        <div class="generate-queue-actions">
+          <button id="refreshQueueBtn" class="action secondary" type="button">刷新</button>
+          <button id="closeQueueBtn" class="action secondary" type="button">关闭</button>
+        </div>
+      </div>
+      <div id="queuePanel" class="stack-list empty">暂无队列信息</div>
+    </section>
+
+    <div id="generatePreviewModal" class="image-preview-modal" hidden>
+      <div class="image-preview-backdrop" data-generate-preview-close="true"></div>
+      <section class="image-preview-panel" role="dialog" aria-modal="true" aria-labelledby="generatePreviewTitle">
+        <div class="image-preview-head">
+          <div>
+            <h2 id="generatePreviewTitle">生成结果预览</h2>
+            <div class="preview-head-subline">
+              <span class="status-chip status-chip--live">即时结果 · ComfyUI</span>
+              <div id="generatePreviewMeta" class="muted"></div>
+            </div>
+          </div>
+          <div class="image-preview-actions">
+            <button id="generatePreviewPrevBtn" class="action secondary" type="button">上一张</button>
+            <button id="generatePreviewNextBtn" class="action secondary" type="button">下一张</button>
+            <button id="generatePreviewOpenBtn" class="action secondary" type="button">新窗口打开</button>
+            <button id="closeGeneratePreviewBtn" class="action" type="button">关闭</button>
+          </div>
+        </div>
+        <div class="image-preview-body">
+          <img id="generatePreviewImg" alt="生成结果预览" />
+        </div>
+        <div id="generatePreviewStrip" class="image-preview-strip"></div>
+      </section>
+    </div>
+    <script src="/static/common.js?v=20260829-fehard"></script>
+    <script src="/static/generate.js?v=20260829-fehard"></script>
+  </body>
+</html>

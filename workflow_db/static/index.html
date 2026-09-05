@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("aa-theme") || window.localStorage.getItem("wfdb-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {}
+      })();
+    </script>
+    <title>Armarius Arcanorum</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/vendor/flatpickr/flatpickr.min.css?v=20260823-selectmerge" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260824-narrow3" />
+    <link rel="stylesheet" href="/static/index.css?v=20260824-narrow3" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar topbar--nav-only">
+        <div class="tool-switcher">
+          <button id="searchTopBtn" class="search-top-btn" type="button" aria-label="搜索" title="搜索">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
+          <button id="parseImageBtn" class="tool-link parse-image-btn" type="button" title="上传图片并解析工作流">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg><span id="parseImageLabel">解析图片</span>
+          </button>
+          <input id="parseImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden />
+          <a class="tool-link is-active" href="/">图片库</a>
+          <a class="tool-link" href="/generate">生成</a>
+          <a class="tool-link" href="/stats">统计</a>
+          <a class="tool-link" href="/labels">标注库</a>
+          <a class="tool-link" href="/settings">设置</a>
+          <button id="themeToggleBtn" class="tool-toggle theme-toggle" type="button" aria-label="切换深浅色主题" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+          <button id="summaryToggleBtn" class="summary-toggle" type="button" aria-expanded="false" aria-label="展开/收起状态摘要" title="状态摘要">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="search-top-field" id="searchTopField" hidden>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <textarea id="searchInput" rows="1" placeholder="关键词搜索,每行一个或用空格/逗号分隔"></textarea>
+            <button id="searchAdvBtn" class="search-adv-btn" type="button" title="高级搜索" aria-label="高级搜索" aria-expanded="false">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+            </button>
+            <div class="search-adv-menu" id="searchAdvMenu" hidden>
+              <label class="search-adv-label" for="excludeKeywordsInput">排除关键词(命中任一即隐藏)</label>
+              <div class="search-adv-input">
+                <textarea id="excludeKeywordsInput" rows="2" placeholder="每行一个或用空格/逗号分隔"></textarea>
+                <button id="excludeKeywordsClearBtn" class="field-clear" type="button" title="清除排除词" aria-label="清除排除词" hidden>×</button>
+              </div>
+            </div>
+            <div class="search-history-menu" id="searchHistoryMenu" hidden>
+              <div class="search-history-items" id="searchHistoryItems"></div>
+              <button class="search-history-clear" id="searchHistoryClearBtn" type="button">清空历史</button>
+            </div>
+            <div class="tag-suggest-menu" id="tagSuggestMenu" hidden></div>
+          </div>
+        </div>
+      </header>
+      <div class="summary-drawer" id="summaryDrawer">
+        <div class="summary-popover" id="summaryPopover" hidden>
+          <div class="summary-row">
+            <div class="summary-card">
+              <span id="totalItemsLabel" class="summary-label">批次</span>
+              <strong id="totalImages">0</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">日期范围</span>
+              <strong id="dateRange">-</strong>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">平均 Steps / CFG</span>
+              <strong id="avgStats">-</strong>
+            </div>
+            <div class="summary-card sync-summary-card">
+              <span class="summary-label">数据同步</span>
+              <strong id="syncSummaryState">-</strong>
+              <div id="syncSummaryDetail" class="summary-detail">-</div>
+              <button id="manualSyncBtn" class="action secondary summary-sync-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>扫描新文件</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="filters filters--compact">
+        <div id="syncNotice" class="sync-notice" hidden>
+          <div>
+            <strong id="syncNoticeTitle">发现新的生成文件</strong>
+            <div id="syncNoticeText" class="muted"></div>
+          </div>
+          <div class="sync-notice-actions">
+            <button id="syncRefreshBtn" class="action" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>刷新列表</button>
+          </div>
+        </div>
+        <div class="field filter-filename">
+          <label for="filenameInput">文件名</label>
+          <input id="filenameInput" type="text" />
+        </div>
+        <div class="field filter-model">
+          <label for="modelComboboxInput">基座模型</label>
+          <div class="combo-box" id="modelCombobox">
+            <div class="combo-field-row">
+              <input id="modelComboboxInput" type="text" autocomplete="off" placeholder="全部模型" />
+              <button id="modelClearBtn" class="combo-clear" type="button" aria-label="清除基座模型筛选" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+              <button id="modelComboboxToggle" class="combo-toggle" type="button" aria-label="切换基座模型候选列表"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div id="modelComboboxMenu" class="combo-menu" hidden></div>
+          </div>
+        </div>
+        <div class="field filter-model" id="instanceFilterField" hidden>
+          <label for="instanceSelect">实例</label>
+          <select id="instanceSelect">
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div class="field filter-lora field-lora-multi">
+          <label for="loraComboboxInput">LoRA
+            <span class="lora-andor" data-andor-side="include" aria-label="正向 LoRA 组合方式">
+              <button type="button" class="lora-andor-btn is-active" data-andor-val="or" title="命中任一即筛出">任一</button>
+              <button type="button" class="lora-andor-btn" data-andor-val="and" title="须全部包含才筛出">全部</button>
+            </span>
+          </label>
+          <div class="combo-box combo-multi" id="loraCombobox">
+            <div class="combo-field-row">
+              <input id="loraComboboxInput" type="text" autocomplete="off" placeholder="筛选 LoRA..." />
+              <button id="loraClearBtn" class="combo-clear" type="button" aria-label="清除 LoRA 筛选" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+              <button id="loraComboboxToggle" class="combo-toggle" type="button" aria-label="切换 LoRA 候选列表"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div id="loraComboboxMenu" class="combo-menu" hidden></div>
+          </div>
+        </div>
+        <div class="field filter-lora filter-exclude-lora field-lora-multi">
+          <label for="excludeLoraInput">排除 LoRA
+            <span class="lora-andor" data-andor-side="exclude" aria-label="排除 LoRA 组合方式">
+              <button type="button" class="lora-andor-btn is-active" data-andor-val="and" title="任一带上即排除">任一</button>
+              <button type="button" class="lora-andor-btn" data-andor-val="or" title="须全带上才排除">全部</button>
+            </span>
+          </label>
+          <div class="combo-box combo-multi" id="excludeLoraCombo">
+            <div class="combo-field-row">
+              <input id="excludeLoraInput" type="text" autocomplete="off" placeholder="排除 LoRA..." />
+              <button id="excludeLoraClearBtn" class="combo-clear" type="button" aria-label="清除排除 LoRA" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+              <button id="excludeLoraToggle" class="combo-toggle" type="button" aria-label="切换排除 LoRA 候选列表"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div id="excludeLoraMenu" class="combo-menu" hidden></div>
+          </div>
+        </div>
+        <div class="field filter-favorite-category field-lora-multi">
+          <label for="favoriteCategoryComboInput">收藏夹
+            <span class="lora-andor" data-andor-side="favcat" aria-label="收藏分类组合方式">
+              <button type="button" class="lora-andor-btn is-active" data-andor-val="or" title="命中任一分类即筛出">任一</button>
+              <button type="button" class="lora-andor-btn" data-andor-val="and" title="须同时归属全部分类才筛出">全部</button>
+            </span>
+          </label>
+          <div class="combo-box combo-multi" id="favoriteCategoryCombo">
+            <div class="combo-field-row">
+              <input id="favoriteCategoryComboInput" type="text" autocomplete="off" placeholder="全部分类" />
+              <button id="favoriteCategoryClearBtn" class="combo-clear" type="button" aria-label="清除收藏分类筛选" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+              <button id="favoriteCategoryToggle" class="combo-toggle" type="button" aria-label="切换收藏分类候选列表"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div id="favoriteCategoryMenu" class="combo-menu" hidden></div>
+          </div>
+        </div>
+        <div class="field filter-from-date date-filter-field">
+          <label for="fromDate">开始时间</label>
+          <div class="date-field-control">
+            <input id="fromDate" type="text" data-hint="开始时间" placeholder="2026-08-14 13:25" autocomplete="off" />
+            <button id="fromDateClearBtn" class="field-clear" type="button" aria-label="清除开始时间" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+            <button id="fromDatePickerBtn" class="date-picker-open" type="button" aria-label="打开开始时间日历" title="选择开始时间"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></button>
+          </div>
+        </div>
+        <div class="field filter-to-date date-filter-field">
+          <label for="toDate">结束时间</label>
+          <div class="date-field-control">
+            <input id="toDate" type="text" data-hint="结束时间" placeholder="2026-08-14 13:25" autocomplete="off" />
+            <button id="toDateClearBtn" class="field-clear" type="button" aria-label="清除结束时间" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+            <button id="toDatePickerBtn" class="date-picker-open" type="button" aria-label="打开结束时间日历" title="选择结束时间"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></button>
+          </div>
+        </div>
+        <div class="field filter-page-size">
+          <label for="pageSizeSelect">条数</label>
+          <select id="pageSizeSelect">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+        <div class="field filter-favorite">
+          <label class="fav-check-label" for="favoriteOnlyInput">
+            <input id="favoriteOnlyInput" type="checkbox" />
+            <span>只看收藏</span>
+          </label>
+        </div>
+        <div class="field filter-views">
+          <label for="filterViewSelect">视图</label>
+          <div class="filter-views-row">
+            <select id="filterViewSelect">
+              <option value="">常用视图…</option>
+            </select>
+            <button id="filterViewSaveBtn" class="action secondary" type="button" title="将当前筛选保存为命名视图">保存视图</button>
+            <button id="filterViewDeleteBtn" class="field-clear" type="button" title="删除所选视图" aria-label="删除所选视图" hidden>×</button>
+          </div>
+        </div>
+        <div class="actions filter-actions">
+          <button id="applyBtn" class="action"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>筛选</button>
+        </div>
+      </section>
+
+      <main class="split-workspace" id="splitWorkspace">
+        <section class="main-pane">
+          <section class="panel">
+            <div class="panel-head">
+              <div class="panel-title-group">
+                <h2>图片列表</h2>
+                <span class="source-chip" title="列表数据来自扫描归档库">归档库</span>
+              </div>
+              <div class="panel-head-actions">
+                <span id="resultCount" class="muted"></span>
+                <label class="select-all" id="selectAllWrap" title="全选本页">
+                  <input type="checkbox" id="selectAllRows" aria-label="全选本页" />
+                  <span>全选</span>
+                </label>
+              </div>
+            </div>
+            <div id="resultsList" class="table-wrap"></div>
+            <div class="lora-stacks" id="loraStacks">
+              <div class="lora-stack lora-stack-include" id="loraIncludeStack" hidden>
+                <span class="lora-stack-label">正向 LoRA</span>
+                <div class="lora-stack-chips" id="loraIncludeChips"></div>
+                <button type="button" class="lora-stack-more" id="loraIncludeMoreBtn" hidden>展开全部</button>
+              </div>
+              <div class="lora-stack lora-stack-exclude" id="loraExcludeStack" hidden>
+                <span class="lora-stack-label">排除 LoRA</span>
+                <div class="lora-stack-chips" id="loraExcludeChips"></div>
+                <button type="button" class="lora-stack-more" id="loraExcludeMoreBtn" hidden>展开全部</button>
+              </div>
+              <div class="lora-stack lora-stack-favcat" id="favoriteCategoryStack" hidden>
+                <span class="lora-stack-label">收藏分类</span>
+                <div class="lora-stack-chips" id="favoriteCategoryChips"></div>
+                <button type="button" class="lora-stack-more" id="favoriteCategoryMoreBtn" hidden>展开全部</button>
+              </div>
+            </div>
+            <div id="paginationBar" class="pagination-bar"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <div id="imagePreviewModal" class="image-preview-modal" hidden>
+      <div class="image-preview-backdrop" data-preview-close="true"></div>
+      <section class="image-preview-panel" role="dialog" aria-modal="true" aria-labelledby="imagePreviewTitle">
+        <div class="image-preview-head">
+          <div class="image-preview-title-group">
+            <h2 id="imagePreviewTitle">图片预览</h2>
+            <div id="imagePreviewMeta" class="muted"></div>
+          </div>
+          <div class="image-preview-actions">
+            <a id="previewGenerateLink" class="ghost-btn" href="/generate">去生成</a>
+            <button id="copyPositiveBtn" class="ghost-btn" type="button">复制正向 Prompt</button>
+            <button id="copyWorkflowBtn" class="ghost-btn" type="button" hidden>复制工作流</button>
+            <button id="exportWorkflowBtn" class="ghost-btn" type="button" hidden>导出工作流</button>
+            <button id="previewNodeGraphBtn" class="ghost-btn" type="button" hidden>节点图</button>
+            <button id="closeImagePreviewBtn" class="ghost-btn preview-close-btn" type="button" aria-label="关闭预览">×</button>
+          </div>
+        </div>
+        <div class="image-preview-main">
+          <div class="image-preview-stage">
+            <div id="imagePreviewStrip" class="image-preview-strip"></div>
+            <div class="image-preview-body" id="imagePreviewBody">
+              <img id="imagePreviewImg" alt="预览图" decoding="async" />
+              <div id="previewNodeGraphStage" style="display:none"></div>
+              <button id="previewPrevBtn" class="preview-nav preview-nav-prev" type="button" aria-label="上一张">‹</button>
+              <button id="previewNextBtn" class="preview-nav preview-nav-next" type="button" aria-label="下一张">›</button>
+            </div>
+          </div>
+          <aside id="imagePreviewDetails" class="image-preview-side"></aside>
+        </div>
+      </section>
+    </div>
+    <!-- 左下角悬浮组:批量操作卡片(上) + 选中缩略图窗口(下),上下堆叠,互不侵占预览 -->
+    <div class="selection-pop" id="selectionPop">
+      <!-- 批量操作卡片:独立窗口外,类比右下 lora;选中 ≥1 时出现 -->
+      <nav class="bulk-actions-panel" id="bulkActions" aria-label="批量操作" hidden>
+        <button type="button" class="bulk-btn" id="bulkFavoriteBtn" title="将选中条目的全部图片收藏到未分类">收藏</button>
+        <div class="bulk-cat-picker">
+          <button type="button" class="bulk-btn" id="bulkCatToggle" aria-haspopup="true" aria-expanded="false" title="将选中条目的全部图片收藏到指定分类(可多选)">移入分类 ▾</button>
+          <div class="bulk-cat-menu" id="bulkCatMenu" hidden>
+            <div class="bulk-cat-checks" id="bulkCatChecks"></div>
+            <button type="button" class="bulk-btn bulk-btn--primary" id="bulkCatApply">移入</button>
+          </div>
+        </div>
+        <button type="button" class="bulk-btn" id="bulkUnfavoriteBtn" title="将选中条目的全部图片从收藏移除">取消收藏</button>
+        <button type="button" class="bulk-btn" id="bulkExportBtn" title="导出选中条目的元数据 CSV">导出 CSV</button>
+      </nav>
+      <!-- 选中反馈面板:3×3 缩略图网格,点击缩略图取消选中 -->
+      <aside class="selection-panel" id="selectionPanel" hidden aria-label="已选缩略图面板">
+        <div class="selection-panel-head">
+          <span id="selectionPanelCount">已选 0 项</span>
+          <button type="button" id="selectionPanelClear" class="selection-panel-clear" title="清空全部选中">清空</button>
+        </div>
+        <div class="selection-panel-grid" id="selectionPanelGrid"></div>
+      </aside>
+    </div>
+    <script src="/static/vendor/flatpickr/flatpickr.min.js?v=20260823-selectmerge"></script>
+    <script src="/static/vendor/flatpickr/zh.js?v=20260823-selectmerge"></script>
+    <script src="/static/common.js?v=20260829-fehard"></script>
+    <script src="/static/enrichment_view.js?v=20260829-fehard"></script>
+    <script src="/static/transient_preview.js?v=20260829-fehard"></script>
+    <script src="/static/app.js?v=20260829-fehard"></script>
+  </body>
+</html>

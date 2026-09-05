@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("aa-theme") || window.localStorage.getItem("wfdb-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {}
+      })();
+    </script>
+    <title>Armarius Arcanorum - Settings</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260824-narrow3" />
+    <link rel="stylesheet" href="/static/settings.css?v=20260826-layout" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar topbar--nav-only">
+        <div class="tool-switcher">
+          <a class="tool-link" href="/">图片库</a>
+          <a class="tool-link" href="/generate">生成</a>
+          <a class="tool-link" href="/stats">统计</a>
+          <a class="tool-link" href="/labels">标注库</a>
+          <a class="tool-link is-active" href="/settings">设置</a>
+          <button id="themeToggleBtn" class="tool-toggle theme-toggle" type="button" aria-label="切换深浅色主题" aria-pressed="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+          <button id="summaryToggleBtn" class="summary-toggle" type="button" aria-expanded="false" aria-label="展开/收起状态摘要" title="状态摘要">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="summary-drawer" id="summaryDrawer">
+        <div class="summary-popover" id="summaryPopover" hidden>
+          <div class="summary-row">
+            <div class="summary-card settings-state-card">
+              <span class="summary-label">配置文件</span>
+              <strong id="settingsFilePath" class="summary-value">-</strong>
+            </div>
+            <div class="summary-card settings-state-card">
+              <span class="summary-label">生效状态</span>
+              <strong id="settingsEffectiveState" class="summary-value"><span class="state-dot is-unknown"></span><span id="settingsEffectiveText">加载中…</span></strong>
+            </div>
+            <div class="summary-card settings-state-card">
+              <span class="summary-label">未保存修改</span>
+              <strong id="settingsDirtyCount" class="summary-value">0</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <main id="settingsGroups" class="settings-groups"></main>
+
+      <footer class="settings-action-bar">
+        <div class="settings-action-left muted" id="settingsActionHint">修改后保存,重启服务生效</div>
+        <div class="settings-action-buttons">
+          <button id="settingsRawToggleBtn" class="action secondary" type="button">查看原始文件</button>
+          <button id="settingsRevertBtn" class="action secondary" type="button" disabled>还原</button>
+          <button id="settingsSaveBtn" class="action settings-save-btn" type="button" disabled>保存设置</button>
+        </div>
+      </footer>
+      <pre id="settingsRawView" class="settings-raw-view" hidden></pre>
+    </div>
+    <script src="/static/common.js?v=20260829-fehard"></script>
+    <script src="/static/settings.js?v=20260826-layout"></script>
+  </body>
+</html>
