@@ -123,11 +123,20 @@ Linux `~/.local/share/armarius_arcanorum`，旧目录 `workflow_db` 自动平滑
 不。生成功能目前处于极其初步的试验阶段，可能高度不稳定且存在较多缺陷;
 检索、统计、标注等查阅与整理能力相对成熟，推荐优先使用。
 
-## 更多文档
+## 文档路由(按需取用,无需通读)
 
-面向部署 / 运维的部署与架构速览:[`GUIDE.md`](GUIDE.md)。
-面向开发者的问题定位与 Issue 提交规范:[`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md)。
-源码仓库内的数据契约与规范见 `docs/`(契约/解析规范随发布包)。
+| 你要做的事 | 读这些 |
+|---|---|
+| 快速上手使用 | 本文 + [`QUICK_START.md`](QUICK_START.md) |
+| 部署 / 运维 / 架构速览 | [`GUIDE.md`](GUIDE.md) |
+| 自行打包 / 发布改版 | [`GUIDE.md`](GUIDE.md) + `release.sh` 头部用法注释 |
+| 问题定位 / 提 Issue | [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) |
+| 改解析器 / 数据契约 | [`docs/parser/PARSER_SPEC.md`](docs/parser/PARSER_SPEC.md)(顶部含最小阅读路径)、[`docs/contracts/parse_worker_protocol.md`](docs/contracts/parse_worker_protocol.md) |
+| 构建推荐库数据资产 | [`docs/DATA_BOOTSTRAP_GUIDE.md`](docs/DATA_BOOTSTRAP_GUIDE.md) |
+| 再分发许可义务 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) + [`danbooru/ASSET_LICENSES.md`](danbooru/ASSET_LICENSES.md) |
+
+其余专题文档(`docs/parser/` 其余篇目、`docs/tag_suggest.md`、`docs/remote_image_library.md` 等)
+按上表入口按需深入;文档间仅有查阅级引用,不存在必读顺序。
 
 ## 许可证与分发
 

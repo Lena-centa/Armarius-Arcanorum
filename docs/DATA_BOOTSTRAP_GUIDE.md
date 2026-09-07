@@ -8,7 +8,7 @@
 
 ### 1.1 为什么远端代码库不包含数据库实体
 
-项目在 [`.gitignore`](../.gitignore) 中对以下数据资产做了严格排除：
+项目在 `.gitignore` 中对以下数据资产做了严格排除：
 1. **主业务数据**（`data/gray_workflow.sqlite3*`）：用户本地生图记录与工作流资产，属用户私有数据。
 2. **推荐库衍生数据**（`danbooru/*.sqlite3`, `danbooru/*.npy`, `danbooru/*.tsv`）：由公开数据集离线衍生的大体积二进制文件（约 860MB），避免污染代码仓库历史。
 3. **备份数据**（`backups/mongodb/`）与发布包（`releases/`）。

@@ -35,6 +35,51 @@
   font-size: 12px;
 }
 
+/* 任务8:combobox 拼行规则全局化(错位修复)。
+ * 共享 .combo-box 为 flex column,input 与 ▼ toggle 竖排;此前仅窄屏断点内
+ * 以 grid 拼回同行,宽屏(>=1200px)无覆盖导致 toggle 掉到输入框下一行、
+ * 筛选区错位。提升为全断点生效:input+toggle 恒同行;combo-clear 为 absolute
+ * 悬浮不入 grid 流;combo-menu absolute 跨列悬浮。 */
+#statsFocusLoraCombo,
+#statsModelCombobox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: stretch;
+}
+
+#statsFocusLoraCombo > input,
+#statsModelCombobox > input {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#statsFocusLoraCombo > .combo-toggle,
+#statsModelCombobox > .combo-toggle {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+#statsFocusLoraCombo > .combo-menu,
+#statsModelCombobox > .combo-menu {
+  grid-column: 1 / -1;
+}
+
+/* 任务9:统计表列宽密度修复(数字留白挤占 label 列)。
+ * 共享 .stats-table 为 table-layout:fixed 且无列宽定义,各列均分宽度:
+ * 数字列(出现次数/文档数/使用率/密度)内容仅 2-6 字符却各占 ~20% 宽,
+ * Layer/Prompt 文本列反被压窄。覆盖为 auto 布局:数字列 nowrap+1% 收缩
+ * 到内容宽,剩余宽度全量让给首列 label;数字含表头右对齐,便于纵向比较。 */
+.stats-table {
+  table-layout: auto;
+}
+
+.stats-table th:not(:first-child),
+.stats-table td:not(:first-child) {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
 /* 任务7:窄屏防御。
  * 表头 sticky/斑马纹/hover 与 .stats-table-wrap 横向滚动均已在 styles.css 生效;
  * 此处仅兜底:限制本页两列布局与表格滚动容器不超出视口,确保页面级无横向溢出,
@@ -67,30 +112,6 @@
   .filters .filter-actions .action {
     width: 100%;
     min-height: 40px;
-  }
-
-  #statsFocusLoraCombo,
-  #statsModelCombobox {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 24px;
-    align-items: stretch;
-  }
-
-  #statsFocusLoraCombo > input,
-  #statsModelCombobox > input {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  #statsFocusLoraCombo > .combo-toggle,
-  #statsModelCombobox > .combo-toggle {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  #statsFocusLoraCombo > .combo-menu,
-  #statsModelCombobox > .combo-menu {
-    grid-column: 1 / -1;
   }
 
   .stats-layout {
@@ -128,30 +149,6 @@
   .filters .filter-actions,
   .filters .filter-toggle {
     grid-column: span 2;
-  }
-
-  #statsFocusLoraCombo,
-  #statsModelCombobox {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 24px;
-    align-items: stretch;
-  }
-
-  #statsFocusLoraCombo > input,
-  #statsModelCombobox > input {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  #statsFocusLoraCombo > .combo-toggle,
-  #statsModelCombobox > .combo-toggle {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  #statsFocusLoraCombo > .combo-menu,
-  #statsModelCombobox > .combo-menu {
-    grid-column: 1 / -1;
   }
 
   .stats-layout {

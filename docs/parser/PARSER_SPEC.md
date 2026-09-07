@@ -8,6 +8,13 @@
 > 配套数据契约：[`docs/contracts/record.schema.json`](../contracts/record.schema.json)
 >
 > 关联系统上下文:系统架构与 Worker 协议见 [`../contracts/parse_worker_protocol.md`](../contracts/parse_worker_protocol.md)
+>
+> **最小阅读路径**(按任务裁剪,不必通读全部关联文档):
+> - 改字段语义 / 提取阈值 → 仅本文即可
+> - 动 Worker 协议 → 加读 [`../contracts/parse_worker_protocol.md`](../contracts/parse_worker_protocol.md)
+> - 查已知边界与限制 → [`KNOWN_GAPS.md`](KNOWN_GAPS.md)
+> - NovelAI 适配 / 统计看板字段 → [`NOVELAI_SUPPORT.md`](NOVELAI_SUPPORT.md) / [`ENRICHMENT.md`](ENRICHMENT.md)
+> - 图结构模型 → [`WORKFLOW_IR.md`](WORKFLOW_IR.md)(与本文互为表里,首次改动解析器建议同读)
 
 ## 1. 在系统中的位置
 

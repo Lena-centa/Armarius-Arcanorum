@@ -548,6 +548,107 @@
     return `${dir}${sep}gray_workflow.sqlite3`;
   }
 
+  // 「界面偏好」:纯前端渲染偏好(localStorage 即时生效,无需重启/保存),
+  // 键与读取方(app.js)通过 common.js 的 uiPref/setUiPref 共享。
+  const UI_PREF_DEFS = {
+    negativePromptCollapsedByDefault: {
+      label: "Negative prompt 默认折叠",
+      hint: "开启后列表页 Negative prompt 列收起为标题行,点击 + 随时展开;仅影响列表页,详情页保持展开。",
+    },
+  };
+
+  // 对当前已渲染的列表页 Negative 单元格按新默认值整体重置
+  // (与刷新后的渲染默认一致;手动展开的行同样回到默认态)
+  function applyNegativeDefaultCollapsed(collapsed) {
+    document.querySelectorAll(".prompt-cell--negative .prompt-entry").forEach((entry) => {
+      entry.classList.toggle("is-collapsed", collapsed);
+      const toggle = entry.querySelector(".prompt-entry-toggle");
+      if (toggle) {
+        toggle.textContent = collapsed ? "+" : "−";
+      }
+    });
+  }
+
+  function renderUiPrefsPanel() {
+    const container = document.getElementById("settingsGroups");
+    if (!container || document.getElementById("uiPrefsPanel")) {
+      return;
+    }
+
+    const panel = document.createElement("section");
+    panel.id = "uiPrefsPanel";
+    panel.className = "panel settings-panel";
+
+    const head = document.createElement("div");
+    head.className = "settings-panel-head";
+    head.setAttribute("role", "button");
+    head.setAttribute("tabindex", "0");
+    head.setAttribute("aria-expanded", "true");
+    const title = document.createElement("h2");
+    title.textContent = "界面偏好";
+    const count = document.createElement("span");
+    count.className = "group-count";
+    count.textContent = "立即生效";
+    const chevron = document.createElement("span");
+    chevron.className = "group-chevron";
+    chevron.textContent = "▾";
+    head.append(title, count, chevron);
+    panel.appendChild(head);
+
+    const grid = document.createElement("div");
+    grid.className = "settings-grid";
+    for (const [key, def] of Object.entries(UI_PREF_DEFS)) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "field settings-field";
+
+      const label = document.createElement("label");
+      label.htmlFor = `uiPref_${key}`;
+      label.textContent = def.label;
+      wrapper.appendChild(label);
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.id = `uiPref_${key}`;
+      checkbox.checked = !!uiPref(key, false);
+      checkbox.style.justifySelf = "start";
+      checkbox.addEventListener("change", () => {
+        setUiPref(key, checkbox.checked);
+        if (key === "negativePromptCollapsedByDefault") {
+          applyNegativeDefaultCollapsed(checkbox.checked);
+        }
+      });
+      wrapper.appendChild(checkbox);
+
+      const hint = document.createElement("p");
+      hint.className = "muted settings-hint";
+      hint.textContent = def.hint;
+      wrapper.appendChild(hint);
+      grid.appendChild(wrapper);
+    }
+    panel.appendChild(grid);
+    // 紧跟「数据目录」面板之后(.env 配置组之前);数据目录尚未渲染时兜底置顶
+    const dataDir = document.getElementById("dataDirPanel");
+    if (dataDir && dataDir.parentNode === container) {
+      container.insertBefore(panel, dataDir.nextSibling);
+    } else {
+      container.prepend(panel);
+    }
+
+    const toggle = () => {
+      const collapsed = panel.classList.toggle("is-collapsed");
+      head.setAttribute("aria-expanded", String(!collapsed));
+      state.collapsed["界面偏好"] = collapsed;
+      persistCollapseState();
+    };
+    head.addEventListener("click", toggle);
+    head.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  }
+
   async function loadSettings() {
     try {
       // 设置全量 + 数据目录状态 + 备份状态并行拉取;后两者失败不阻塞主表单
@@ -572,6 +673,7 @@
       renderGroups();
       renderMongoTestButton();
       renderDataDirPanel(dataStatus, backupStatus);
+      renderUiPrefsPanel();
       updateDirtyUI();
     } catch (error) {
       showToast(`加载设置失败: ${error.message}`, { type: "error" });

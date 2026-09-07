@@ -9,6 +9,32 @@
     return window.__API_BASE__ + path;
   };
 
+  // UI 偏好:纯前端渲染偏好,localStorage 持久化、即时生效,
+  // 与设置页的 .env 服务端配置(需重启)相互独立。
+  var UI_PREFS_KEY = "aa-ui-prefs";
+
+  window.uiPrefs = function () {
+    try {
+      var stored = JSON.parse(window.localStorage.getItem(UI_PREFS_KEY) || "{}");
+      return stored && typeof stored === "object" ? stored : {};
+    } catch (error) {
+      return {};
+    }
+  };
+
+  window.uiPref = function (key, fallback) {
+    var prefs = window.uiPrefs();
+    return Object.prototype.hasOwnProperty.call(prefs, key) ? prefs[key] : fallback;
+  };
+
+  window.setUiPref = function (key, value) {
+    var prefs = window.uiPrefs();
+    prefs[key] = value;
+    try {
+      window.localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs));
+    } catch (error) {}
+  };
+
   var THEME_KEY = "aa-theme";
   var LEGACY_THEME_KEY = "wfdb-theme";
 

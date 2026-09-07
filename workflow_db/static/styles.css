@@ -578,11 +578,10 @@ body.preview-open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  min-height: 24px;
-  padding: 0 6px;
+  min-height: 32px;
+  padding: 0 11px;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -590,14 +589,7 @@ body.preview-open {
 }
 .search-top-btn:hover {
   color: var(--text);
-  background: var(--surface);
-  border-color: var(--line);
-}
-.search-top-btn.is-active,
-.search-top-btn[aria-expanded="true"] {
-  border-color: var(--line-strong);
-  background: var(--surface-container-highest);
-  color: var(--text);
+  background: var(--row-hover);
 }
 .search-top-btn[hidden] {
   display: none;
@@ -636,7 +628,7 @@ body.preview-open {
   min-height: 22px;
   height: 22px;
   max-height: 120px;
-  padding: 0;
+  padding: 2px 0;
   border: 0;
   outline: none;
   appearance: none;
@@ -656,10 +648,6 @@ body.preview-open {
 }
 .search-top-field textarea::placeholder {
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 22px;
 }
 
 /* 高级搜索按钮:胶囊内右侧图标钮,激活态以文字色标识 */
@@ -682,9 +670,6 @@ body.preview-open {
 .search-adv-btn[aria-expanded="true"] {
   color: var(--text);
   background: var(--row-hover);
-}
-.search-adv-btn.has-filter {
-  color: var(--accent);
 }
 
 /* 高级搜索面板与搜索历史面板:紧凑卡片外观 */
@@ -2592,6 +2577,7 @@ textarea {
   display: block;
   word-break: break-word;
   font: inherit;
+  font-weight: 500;
   color: var(--muted);
   user-select: text;
   -webkit-user-select: text;

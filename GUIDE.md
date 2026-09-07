@@ -49,8 +49,9 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -RepoUrl <仓库地址>   
 
 ### 2.3 配置(用户数据目录 `.env`,缺失时自动生成)
 
-配置统一存放在用户数据目录(Windows `%LOCALAPPDATA%\workflow_db`、
-Linux `~/.local/share/workflow_db`;进程环境变量 `WORKFLOW_DATA_DIR` 可覆盖,
+配置统一存放在用户数据目录(Windows `%LOCALAPPDATA%\armarius_arcanorum`、
+Linux `~/.local/share/armarius_arcanorum`,旧目录 `workflow_db` 自动平滑继承;
+进程环境变量 `ARMARIUS_DATA_DIR` / `WORKFLOW_DATA_DIR` 可覆盖,
 **不能写进 .env 本身**)。`.env` 缺失时网关首启从 `.env.example` 自动生成;
 旧仓库根 `.env` 与 `data/` 主库会在首启时自动迁移(原文件改名 `*.migrated`)。
 若同一工作区同时运行 Windows 与 WSL,将路径配置分别放在数据目录内的

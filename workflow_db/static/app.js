@@ -774,7 +774,10 @@ function promptEntriesForDisplay(prompts, rawPrompt = null) {
   });
 }
 
-function promptSummary(prompts, rawPrompt = null) {
+// options.entryCollapsed: 条目初始为折叠态(设置页「界面偏好」按偏好传入;
+// 折叠交互本身仍由 data-toggle-entry 处理,手动展开不受影响)
+function promptSummary(prompts, rawPrompt = null, options = null) {
+  const defaultCollapsed = !!(options && options.entryCollapsed);
   const displayPrompts = promptEntriesForDisplay(prompts, rawPrompt);
   if (!displayPrompts.length) return '<div class="empty">-</div>';
   return displayPrompts
@@ -796,7 +799,7 @@ function promptSummary(prompts, rawPrompt = null) {
           return `<div class="prompt-layer"><div class="prompt-layer-meta"><button class="prompt-layer-copy" type="button" data-copy-layer aria-label="复制当前 Layer">复制</button><div class="prompt-layer-label" aria-hidden="true">[Layer ${Number(layer.layer_index || 0) + 1}]</div><button class="prompt-layer-toggle" type="button" data-toggle-layer aria-label="折叠/展开当前 Layer" title="折叠/展开">−</button></div><div class="prompt-pre">${highlightPromptText(lines.filter(Boolean).join("\n"))}</div></div>`;
         })
         .join("");
-      return `<div class="prompt-entry"><div class="prompt-entry-header"><div class="prompt-entry-label">${escapeHtml(label)}</div><button class="prompt-entry-toggle" type="button" data-toggle-entry aria-label="折叠/展开整体" title="折叠/展开整体">−</button></div><div class="prompt-entry-body">${layers}</div></div>`;
+      return `<div class="prompt-entry${defaultCollapsed ? " is-collapsed" : ""}"><div class="prompt-entry-header"><div class="prompt-entry-label">${escapeHtml(label)}</div><button class="prompt-entry-toggle" type="button" data-toggle-entry aria-label="折叠/展开整体" title="折叠/展开整体">${defaultCollapsed ? "+" : "−"}</button></div><div class="prompt-entry-body">${layers}</div></div>`;
     })
     .join("");
 }
@@ -2971,7 +2974,7 @@ function renderResults(payload) {
                   <div class="meta-stack">
                     <div class="meta-block">
                       <span class="meta-label">Model</span>
-                      <div>${escapeHtml(item.model?.base_model) || "-"}</div>
+                      <div>${item.model.base_model || "-"}</div>
                     </div>
                     <div class="meta-block">
                       <span class="meta-label">LoRA</span>
@@ -2991,7 +2994,7 @@ function renderResults(payload) {
                 <td class="prompt-cell prompt-cell--positive">
                   ${detailPending ? '<div class="muted">正在加载详细信息...</div>' : `${manualLabelMatchesHtml(manualLabelMatches)}${promptSummary(prompts.positive, rawPrompt)}`}
                 </td>
-                <td class="prompt-cell prompt-cell--negative">${detailPending ? '<div class="muted">正在加载详细信息...</div>' : promptSummary(prompts.negative, rawPrompt)}</td>
+                <td class="prompt-cell prompt-cell--negative">${detailPending ? '<div class="muted">正在加载详细信息...</div>' : promptSummary(prompts.negative, rawPrompt, uiPref("negativePromptCollapsedByDefault", false) ? { entryCollapsed: true } : null)}</td>
               </tr>
             `;
           })
@@ -3233,7 +3236,6 @@ function renderPreviewStrip(images, activeIndex) {
               rowKey
                 ? `<label class="preview-strip-check" title="${pending ? "移出待处理" : "加入待处理"}">
                      <input type="checkbox" data-preview-strip-fav="${escapeHtml(rowKey)}"${pending ? " checked" : ""} aria-label="加入待处理" />
-                     <span class="preview-strip-check-label">待处理</span>
                    </label>`
                 : ""
             }
@@ -4390,18 +4392,10 @@ function applyFilterParams(params) {
     const searchInput = document.getElementById("searchInput");
     searchInput.value = search;
     document.getElementById("searchTopField").hidden = false;
-    const searchTopBtn = document.getElementById("searchTopBtn");
-    if (searchTopBtn) {
-      searchTopBtn.classList.add("is-active");
-      searchTopBtn.setAttribute("aria-expanded", "true");
-    }
-    // 与 autoResizeSearch 同逻辑:单行保持默认居中,多行关键词展开高度避免 rows=1 内滚动
+    document.getElementById("searchTopBtn").hidden = true;
+    // 与 autoResizeSearch 同逻辑:多行关键词展开高度,避免 rows=1 内滚动
     searchInput.style.height = "auto";
-    if (searchInput.scrollHeight <= 24) {
-      searchInput.style.height = "";
-    } else {
-      searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
-    }
+    searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
   }
   const filename = params.get("filename");
   if (filename) document.getElementById("filenameInput").value = filename;
@@ -4429,14 +4423,6 @@ function applyFilterParams(params) {
     const input = document.getElementById("excludeKeywordsInput");
     input.value = excludeQ;
     document.getElementById("excludeKeywordsClearBtn").hidden = false;
-    const searchAdvBtn = document.getElementById("searchAdvBtn");
-    if (searchAdvBtn) searchAdvBtn.classList.add("has-filter");
-    document.getElementById("searchTopField").hidden = false;
-    const searchTopBtn = document.getElementById("searchTopBtn");
-    if (searchTopBtn) {
-      searchTopBtn.classList.add("is-active");
-      searchTopBtn.setAttribute("aria-expanded", "true");
-    }
   }
   const fromDate = params.get("from_date");
   if (fromDate) document.getElementById("fromDate").value = formatCapturedAt(fromDate);
@@ -4562,13 +4548,8 @@ function resetFilterInputs() {
   const searchInput = document.getElementById("searchInput");
   if (searchInput.value) {
     searchInput.value = "";
-    searchInput.style.height = "";
     document.getElementById("searchTopField").hidden = true;
-    const searchTopBtn = document.getElementById("searchTopBtn");
-    if (searchTopBtn) {
-      searchTopBtn.classList.remove("is-active");
-      searchTopBtn.setAttribute("aria-expanded", "false");
-    }
+    document.getElementById("searchTopBtn").hidden = false;
   }
   document.getElementById("filenameInput").value = "";
   document.getElementById("modelComboboxInput").value = "";
@@ -4581,10 +4562,6 @@ function resetFilterInputs() {
   state.excludeLoraMode = "and";
   document.getElementById("excludeKeywordsInput").value = "";
   document.getElementById("excludeKeywordsClearBtn").hidden = true;
-  const searchAdvBtn = document.getElementById("searchAdvBtn");
-  if (searchAdvBtn) {
-    searchAdvBtn.classList.remove("has-filter");
-  }
   document.getElementById("fromDate").value = "";
   document.getElementById("toDate").value = "";
   state.favoritesOnly = false;
@@ -5071,34 +5048,20 @@ async function boot() {
     searchHistoryMenu.hidden = false;
   };
   const autoResizeSearch = () => {
-    if (!searchInput.value.trim()) {
-      searchInput.style.height = "";
-      return;
-    }
     searchInput.style.height = "auto";
-    if (searchInput.scrollHeight <= 24) {
-      searchInput.style.height = "";
-    } else {
-      searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
-    }
+    searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
   };
   const collapseSearch = () => {
-    if (!searchInput.value.trim()) {
-      searchInput.style.height = "";
-    }
     searchTopField.hidden = true;
-    if (searchTopBtn) {
-      searchTopBtn.classList.remove("is-active");
-      searchTopBtn.setAttribute("aria-expanded", "false");
-    }
+    searchTopBtn.hidden = false;
   };
-  // 关闭高级面板:解除锁定,主输入与排除词均为空则顺带收起(关闭面板是允许隐藏的时机之一);
+  // 关闭高级面板:解除锁定,主输入为空则顺带收起(关闭面板是允许隐藏的时机之一);
   // collapse:false 用于与历史面板互斥切换时,避免误收起搜索框
   const closeSearchAdv = ({ collapse = true } = {}) => {
     searchAdvOpen = false;
     searchAdvMenu.hidden = true;
     searchAdvBtn.setAttribute("aria-expanded", "false");
-    if (collapse && !searchInput.value.trim() && !excludeKeywordsInput.value.trim()) {
+    if (collapse && !searchInput.value.trim()) {
       collapseSearch();
     }
   };
@@ -5109,23 +5072,13 @@ async function boot() {
     searchAdvOpen = true;
     searchAdvMenu.hidden = false;
     searchAdvBtn.setAttribute("aria-expanded", "true");
-    excludeKeywordsInput.focus();
   };
   const syncExcludeKeywordsClear = () => {
-    const hasValue = !!excludeKeywordsInput.value.trim();
-    document.getElementById("excludeKeywordsClearBtn").hidden = !hasValue;
-    if (searchAdvBtn) {
-      searchAdvBtn.classList.toggle("has-filter", hasValue);
-    }
+    document.getElementById("excludeKeywordsClearBtn").hidden = !excludeKeywordsInput.value;
   };
   if (searchTopBtn && searchTopField && searchInput) {
     searchTopBtn.addEventListener("click", () => {
-      if (!searchTopField.hidden) {
-        collapseSearch();
-        return;
-      }
-      searchTopBtn.classList.add("is-active");
-      searchTopBtn.setAttribute("aria-expanded", "true");
+      searchTopBtn.hidden = true;
       searchTopField.hidden = false;
       searchInput.focus();
       autoResizeSearch();
@@ -5157,19 +5110,10 @@ async function boot() {
         applyFilters().catch((error) => showToast(error.message, { type: "error" }));
       }, 400);
     });
-    searchInput.addEventListener("blur", (event) => {
-      // 若焦点转移到了搜索组件内部(高级设置、排除词输入框、历史记录等),不要收起
-      if (event.relatedTarget && event.relatedTarget.closest("#searchTopField, #searchTopBtn")) {
-        return;
+    searchInput.addEventListener("blur", () => {
+      if (!searchInput.value.trim() && !searchAdvOpen && !searchHistoryOpen) {
+        collapseSearch();
       }
-      setTimeout(() => {
-        if (document.activeElement && document.activeElement.closest("#searchTopField, #searchTopBtn")) {
-          return;
-        }
-        if (!searchInput.value.trim() && !excludeKeywordsInput.value.trim() && !searchAdvOpen && !searchHistoryOpen) {
-          collapseSearch();
-        }
-      }, 150);
     });
     // Escape:先关历史面板,再关高级面板;Enter(非 Shift)=完成搜索:
     // 记录历史 + 立即查询并收起搜索框、关两个面板
@@ -5204,10 +5148,6 @@ async function boot() {
   }
   // 高级面板交互:图标按钮 toggle;面板内 Escape 关闭;点击面板外关闭
   if (searchAdvBtn && searchAdvMenu && excludeKeywordsInput) {
-    searchAdvBtn.addEventListener("mousedown", (event) => {
-      // 阻止 mousedown 默认行为,避免 searchInput 触发 blur 导致搜索框被提前收起
-      event.preventDefault();
-    });
     searchAdvBtn.addEventListener("click", () => {
       if (searchAdvOpen) {
         closeSearchAdv();
@@ -5229,13 +5169,10 @@ async function boot() {
         return;
       }
       if (searchHistoryOpen) {
-        closeSearchHistory({ collapse: false });
+        closeSearchHistory();
       }
       if (searchAdvOpen) {
-        closeSearchAdv({ collapse: false });
-      }
-      if (!searchInput.value.trim() && !excludeKeywordsInput.value.trim()) {
-        collapseSearch();
+        closeSearchAdv();
       }
     });
     // 排除词输入:防抖即时搜索(面板保持打开,结果即时生效)
@@ -5644,6 +5581,6 @@ async function boot() {
 }
 
 boot().catch((error) => {
-  document.getElementById("resultsList").innerHTML = `<div class="empty">加载失败: ${escapeHtml(error.message)}</div>`;
+  document.getElementById("resultsList").innerHTML = `<div class="empty">加载失败: ${error.message}</div>`;
   showToast(error.message, { type: "error" });
 });
