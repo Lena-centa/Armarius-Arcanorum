@@ -450,7 +450,7 @@ sha256 = hashlib.sha256(str(resolved_path).encode("utf-8")).hexdigest()
 
 - 取 `parts[2]` 大写化 + `:` 作为盘符
 - 剩余部分用 `PureWindowsPath` 拼接
-- 例：`/mnt/d/erxx/a.png` → `D:\erxx\a.png`
+- 例：`/mnt/d/comfy_output/a.png` → `D:\comfy_output\a.png`
 - 其他路径返回 `None`
 
 ## 11. metadata 字段
@@ -754,5 +754,5 @@ def batch_group_key(samplers, sha256_fallback="", size=None) -> str
 回写,排版不变);`record.spec.ts` 全绿;`tests/` 派生层全绿。
 
 **迁移评估**:键格式变化 → 存量库(batches / batch_images / Mongo images)
-旧键失效,需全量重灌(SQLite:TRUNCATE_SQL + 全量重扫 D:/example;Mongo
+旧键失效,需全量重灌(SQLite:TRUNCATE_SQL + 全量重扫图片目录;Mongo
 按新键重建)。增量扫描解析新文件自动使用新键。

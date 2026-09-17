@@ -441,7 +441,7 @@ export function groupRecipeDocs(
 /**
  * 重建 recipe_groups(SQLite 版):从 batches 按 captured_at DESC 读取,
  * TS 分组(与 Mongo aggregate 等价),整类或局部(recipe_keys)重写。
- * 两种模式均在事务尾部把 fts_recipe_groups 按 rowid 整表重对齐。
+ * FTS 镜像按 rowid 重对齐:局部只动受影响 key,全量整表快照对齐。
  *
  * @param db         SQLite 镜像库
  * @param recipeKeys 局部重建的 key 列表;空数组 = 全量重建
@@ -456,9 +456,10 @@ export function groupRecipeDocs(
  *      - 每组 INSERT OR REPLACE 主表(冗余列:base_model/search_text/count/
  *        batch_keys/has_positive + doc_json 全量)
  *      - 每组的 lora 名逐条入 recipe_lora_names
+ *      - FTS 按 rowid 重对齐(见下)
  *
- * 边界:FTS 无论局部/全量统一整表重对齐(局部 REPLACE 给主表行
- * 分配新 rowid,逐行维护易错;千行级整表重建 <1s,快照语义简单可靠)。
+ * 边界:局部重建的 FTS 只重对齐受影响 key(全表 2k+ 行做 DELETE+INSERT
+ * 会产生整表分词写放大);全量重建保持整表快照对齐。
  */
 export function rebuildRecipeGroupsSqlite(
   db: Database.Database,
@@ -480,6 +481,19 @@ export function rebuildRecipeGroupsSqlite(
     (r) => JSON.parse(r.doc_json) as Record<string, unknown>,
   );
   const grouped = groupRecipeDocs(docs);
+
+  // 局部重建:先快照受影响行的 rowid(FTS 与主表按 rowid 对齐;
+  // 主表 DELETE/REPLACE 之后旧 rowid 可能消失或换号,清理必须用重建前快照)
+  const staleFtsRowIds: number[] = normalizedKeys.length
+    ? (
+        db
+          .prepare(
+            `SELECT rowid AS rid FROM recipe_groups
+              WHERE recipe_key IN (${normalizedKeys.map(() => '?').join(',')})`,
+          )
+          .all(...normalizedKeys) as Array<{ rid: number }>
+      ).map((row) => row.rid)
+    : [];
 
   withTransaction(db, () => {
     // 先删:局部仅删目标 key;全量清整表(FTS 在尾部统一按 rowid 重对齐)
@@ -528,14 +542,35 @@ export function rebuildRecipeGroupsSqlite(
         insertLora.run(doc.recipe_key as string, String(name));
       }
     }
-    // FTS 整表按 rowid 重对齐(局部 REPLACE 会给主表行分配新 rowid,
-    // 逐行维护易错;整表重建千行级 <1s,统一在事务尾部快照对齐)
-    db.exec('DELETE FROM fts_recipe_groups');
-    db.exec(
-      `INSERT INTO fts_recipe_groups(rowid, search_text)
-       SELECT rowid, search_text FROM recipe_groups
-       WHERE search_text IS NOT NULL AND search_text != ''`,
-    );
+    // FTS 按 rowid 重对齐:
+    //   - 局部重建:只处理受影响 key。先按重建前的 rowid 快照清旧行
+    //     (主表 REPLACE 会换 rowid、key 整组消失时主表已无该行,
+    //     只按"当前行"删会漏掉残留),再按当前行重插。
+    //   - 全量重建:整表快照对齐(本身就是全量语义)。
+    if (normalizedKeys.length) {
+      const placeholders = normalizedKeys.map(() => '?').join(',');
+      const deleteFts = db.prepare(
+        'DELETE FROM fts_recipe_groups WHERE rowid = ?',
+      );
+      for (const rid of staleFtsRowIds) deleteFts.run(rid);
+      db.prepare(
+        `DELETE FROM fts_recipe_groups WHERE rowid IN (
+           SELECT rowid FROM recipe_groups WHERE recipe_key IN (${placeholders}))`,
+      ).run(...normalizedKeys);
+      db.prepare(
+        `INSERT INTO fts_recipe_groups(rowid, search_text)
+         SELECT rowid, search_text FROM recipe_groups
+          WHERE recipe_key IN (${placeholders})
+            AND search_text IS NOT NULL AND search_text != ''`,
+      ).run(...normalizedKeys);
+    } else {
+      db.exec('DELETE FROM fts_recipe_groups');
+      db.exec(
+        `INSERT INTO fts_recipe_groups(rowid, search_text)
+         SELECT rowid, search_text FROM recipe_groups
+         WHERE search_text IS NOT NULL AND search_text != ''`,
+      );
+    }
   });
 
   return {

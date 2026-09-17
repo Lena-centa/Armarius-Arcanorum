@@ -554,6 +554,11 @@ def extract_controlnets_from_chain(
         if loader_id:
             name = _controlnet_name_from_loader(prompt, loader_id) or ""
 
+        # CN 参考图/预处理器链(多参考关键):apply 的 image 输入指向 LoadImage/
+        # 预处理器节点;同一工作流可能有多个 apply 各引不同图。
+        # 复用 _extract_mask_chain(对 IMAGE 链同样适用:LoadImage 源、滤镜等)。
+        source_chain = _extract_mask_chain(prompt, inputs.get("image"))
+
         entry: dict[str, Any] = {
             "apply_node_id": nid,
             "apply_type": item["class_type"],
@@ -561,6 +566,7 @@ def extract_controlnets_from_chain(
             "loader_type": loader_ct,
             "control_net_name": name,
             "loader_model_source": loader_model_source,
+            "source_chain": source_chain,
             "strength": inputs.get("strength"),
             "start_percent": inputs.get("start_percent"),
             "end_percent": inputs.get("end_percent"),
@@ -643,8 +649,29 @@ REGION_NODE_HINTS = (
 # 蒙版链语义终点:LoadImage 槽1(MASK 输出)/SolidMask/ImageToMask
 MASK_SOURCE_HINTS = ("loadimage", "solidmask", "imagetomask")
 
-# 蒙版关键参数(值非 None 才收录)
-MASK_PARAM_FIELDS = ("expand", "blur_radius", "strength", "set_cond_area", "incremental_expandrate")
+# 界定"遮罩范围/形状"的参数(值非 None 才收录):
+#   SolidMask: value/width/height(均匀矩形);LoadImageMask: image/channel(通道取 alpha);
+#   GrowMask: expand/tapered_corners(膨胀/收缩);ImageToMask: channel;
+#   MaskComposite: x/y/operation(合成偏移与运算);
+#   InpaintCrop(Improved/_ad):context_expand/blur_mask_pixels 等裁剪与遮罩整形参数。
+MASK_PARAM_FIELDS = (
+    "expand", "blur_radius", "strength", "set_cond_area", "incremental_expandrate",
+    "value", "width", "height", "channel", "x", "y", "operation",
+    "tapered_corners", "resize_source", "mask_channel", "image_path", "source",
+    "image", "color", "tolerance", "keep_proportion",
+    # Impact Pack InpaintCrop(Improved/_ad)的裁剪上下文与遮罩整形参数
+    "context_expand_pixels", "context_expand_factor", "fill_mask_holes",
+    "blur_mask_pixels", "invert_mask", "blend_mask_pixels",
+    "rescale_algorithm", "mode", "force_resize_width", "force_resize_height",
+    # 不同版本/变体的别名拼写(KNOWN_GAPS §2.5)
+    "mask_expand_pixels", "mask_blend_pixels", "blur_mask",
+)
+
+# 从 mask 节点继续向上追溯的输入字段(MaskComposite 的 destination/source 也是 MASK 输入)
+MASK_TRACE_FIELDS = (
+    "mask", "masks", "mask_1", "mask_2", "mask_a", "mask_b",
+    "image", "images", "input_image", "destination", "source",
+)
 
 
 def _is_region_node(ct: str) -> bool:
@@ -653,9 +680,28 @@ def _is_region_node(ct: str) -> bool:
 
 def _is_mask_chain_node(ct: str) -> bool:
     c = ct.lower()
+    # Impact Pack 裁剪节点(InpaintCropImproved / InpaintCrop_ad)名称不含
+    # "mask" 也不含链关键词,但其参数即遮罩几何,须作链节点收集(§2.5)。
+    if "inpaintcrop" in c:
+        return True
     return (
-        "mask" in c and any(h in c for h in ("grow", "blur", "feather", "solid", "toimage", "invert"))
+        "mask" in c
+        and any(
+            h in c
+            for h in ("grow", "blur", "feather", "solid", "toimage", "invert", "composite", "colortomask")
+        )
     ) or any(h in c for h in MASK_SOURCE_HINTS)
+
+
+# IMAGE→IMAGE 预处理器/检测器(ControlNet 参考图链:不改变遮罩范围,仅中转)。
+# ControlNet 参考图常经预处理器(如 DWPreprocessor/AIO_Preprocessor)后接 apply,
+# 该节点不算遮罩终点,应穿透到其 image 上游(LoadImage 等)。
+def _is_image_processor(ct: str) -> bool:
+    c = ct.lower()
+    return (
+        ("preprocessor" in c or "controlnet" in c)
+        and any(h in c for h in ("dw", "aio", "preprocessor", "detector", "normalize", "softedge", "canny", "openpose", "depth", "segmentation", "lineart", "pose"))
+    )
 
 
 def extract_region_views(
@@ -738,6 +784,74 @@ def extract_region_views(
     return regions
 
 
+# 持有 mask 输入的节点(从这些节点的 mask 输入追溯遮罩范围)
+# 条件 mask(inpaint/分区):VAEEncode(SD inpaint)/InpaintModelConditioning/SetLatentNoiseMask;
+# 区域 mask(ConditioningSetMask/SetArea/AttentionCouple 等)已在 regions 提取,这里只补独立链。
+MASK_CONSUMER_HINTS = (
+    "vaeencode", "inpaintmodelconditioning", "setlatentnoisemask",
+    "conditioningsetmask", "conditioning_set_area", "attentioncouple",
+    "regionalprompt", "regionalconditioning", "setarea",
+)
+MASK_INPUT_FIELDS = ("mask", "inpaint_mask", "masked_image", "mask_1", "mask_2", "mask_a", "mask_b")
+
+
+def extract_mask_scopes(
+    prompt: dict[str, Any],
+    sampler_id: str,
+    chain_nodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """独立于 regions 的遮罩范围提取(条件/inpaint/区域 mask 全覆盖)。
+
+    从所有持有 mask 输入且属于 mask 消费方(VAEEncode/InpaintModelConditioning/
+    ConditioningSetMask/区域节点等)的链上节点,对每个 mask 输入端追溯链:
+      {consumer_node_id, consumer_type, input_field, scope}
+    scope = _extract_mask_chain 结果{nodes, source, slot}。
+
+    与 regions.mask 的区别:regions 只覆盖"区域节点当叶子"的 mask;此处
+    覆盖一切 mask 消费方(inpaint 的 mask 通常喂给 VAEEncode 的 mask 输入,
+    从未经过区域节点,现有 regions 不会收录)。跨节点 same chain 不去重
+    (同链可能被不同消费方引用,保留各自 context)。
+    仅拓扑 + 参数,不解析像素(MASK 单通道张量 = 0/1 软掩码,范围由参数定义)。
+    """
+    scopes: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()  # (consumer_node_id, input_field) 去重
+    for item in chain_nodes:
+        nid = item["node_id"]
+        ct = str(item.get("class_type", ""))
+        if not any(h in ct.lower() for h in MASK_CONSUMER_HINTS):
+            continue
+        node = prompt.get(nid)
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs", {}) or {}
+        # 消费者节点自身参数_mask 范围(如 ConditioningSetArea 的 x/y/width/height)
+        consumer_params: dict[str, Any] = {}
+        for field in ("x", "y", "width", "height", "value", "strength", "set_cond_area", "expand"):
+            val = inputs.get(field)
+            if val is not None and not _is_link_value(val):
+                consumer_params[field] = val
+        for field in MASK_INPUT_FIELDS:
+            if field not in inputs:
+                continue
+            key = (nid, field)
+            if key in seen:
+                continue
+            seen.add(key)
+            scope = _extract_mask_chain(prompt, inputs.get(field))
+            if not scope:
+                continue
+            scopes.append(
+                {
+                    "consumer_node_id": nid,
+                    "consumer_type": ct,
+                    "input_field": field,
+                    "consumer_params": consumer_params,
+                    "scope": scope,
+                }
+            )
+    return scopes
+
+
 def _collect_region_text(prompt: dict[str, Any], value: Any, depth: int = 0) -> str:
     """沿区域 cond 链收集文本(CLIPTextEncode 等文本节点)。"""
     if depth > 10:
@@ -799,18 +913,31 @@ def _extract_mask_chain(
 
     if _is_mask_chain_node(ct):
         entry = {"node_id": nid, "class_type": ct, "params": params}
-        # 继续追溯该节点的 mask/图像输入
+        # 继续追溯该节点的 mask/图像输入(MaskComposite 的 destination/source 也是 MASK 输入)
         sub = None
-        for field in ("mask", "image", "images", "input_image"):
+        for field in MASK_TRACE_FIELDS:
             if field in inputs:
                 sub = _extract_mask_chain(prompt, inputs.get(field), depth + 1)
-                if sub:
+                if sub and (sub.get("nodes") or sub.get("source") is not None):
                     break
         if sub:
             return {"nodes": [entry, *sub["nodes"]], "source": sub["source"], "slot": sub["slot"]}
         return {"nodes": [entry], "source": nid, "slot": slot}
 
-    # 终点:非 mask 链节点(如 LoadImage 的 MASK 槽或未知节点)
+    # IMAGE→IMAGE 预处理器(ControlNet 参考图链):记录但不作为终点,穿透到 image 上游
+    if _is_image_processor(ct):
+        for field in MASK_TRACE_FIELDS:
+            if field not in inputs:
+                continue
+            sub = _extract_mask_chain(prompt, inputs.get(field), depth + 1)
+            if sub and (sub.get("nodes") or sub.get("source") is not None):
+                return {"nodes": [{"node_id": nid, "class_type": ct, "params": params}, *sub["nodes"]], "source": sub["source"], "slot": sub["slot"]}
+        # 无上游 image 链接:预处理器本身作终点(常见:预处理器直连末端)
+        return {"nodes": [{"node_id": nid, "class_type": ct, "params": params}], "source": nid, "slot": slot}
+
+    # 终点:既不是 mask 链节点也不是预处理器的节点(如 LoadImage 的 MASK 槽)。
+    # 只登记 source/slot,不产出 node 条目 —— 这类节点的参数不会进入链。
+    # (此前的漏网类型 Impact Pack InpaintCrop 系已入链节点表。)
     return {"nodes": [], "source": nid, "slot": slot}
 
 
@@ -836,7 +963,7 @@ def _is_link_value(value: Any) -> bool:
     return isinstance(value, (list, tuple))
 
 
-def _resolve_value(prompt: dict[str, Any], value: Any, depth: int = 0) -> Any:
+def _resolve_value(prompt: dict[str, Any], value: Any, depth: int = 0, widgets_map: dict[str, Any] | None = None) -> Any:
     """递归解析连线取字面量(与 comfy_replay.resolve_input_value 同构)。
 
     独立实现,不依赖 comfy_replay — sampler_view 是纯派生层。
@@ -862,12 +989,12 @@ def _resolve_value(prompt: dict[str, Any], value: Any, depth: int = 0) -> Any:
             return inputs[field]
 
     if ct == "ImpactConditionalBranch":
-        condition = _resolve_value(prompt, inputs.get("cond"), depth + 1)
+        condition = _resolve_value(prompt, inputs.get("cond"), depth + 1, widgets_map=widgets_map)
         selected = "tt_value" if bool(condition) else "ff_value"
-        return _resolve_value(prompt, inputs.get(selected), depth + 1)
+        return _resolve_value(prompt, inputs.get(selected), depth + 1, widgets_map=widgets_map)
 
     if "sampler" in ct.lower() and "select" in ct.lower() and "sampler_name" in inputs:
-        return _resolve_value(prompt, inputs.get("sampler_name"), depth + 1)
+        return _resolve_value(prompt, inputs.get("sampler_name"), depth + 1, widgets_map=widgets_map)
 
     if ct in {
         "PrimitiveInt",
@@ -878,10 +1005,16 @@ def _resolve_value(prompt: dict[str, Any], value: Any, depth: int = 0) -> Any:
         "Seed (rgthree)",
     }:
         if "value" in inputs:
-            return _resolve_value(prompt, inputs.get("value"), depth + 1)
+            return _resolve_value(prompt, inputs.get("value"), depth + 1, widgets_map=widgets_map)
         if inputs:
             first_key = next(iter(inputs))
-            return _resolve_value(prompt, inputs.get(first_key), depth + 1)
+            return _resolve_value(prompt, inputs.get(first_key), depth + 1, widgets_map=widgets_map)
+        if widgets_map and str(node_id) in widgets_map:
+            wv = widgets_map[str(node_id)]
+            if isinstance(wv, list) and wv:
+                first = wv[0]
+                if isinstance(first, (int, float, str)) and not isinstance(first, bool):
+                    return first
 
     # Primitive-like custom nodes (for example easy int/easy float) retain a
     # literal `value` input even when their class type is unknown.
@@ -891,23 +1024,23 @@ def _resolve_value(prompt: dict[str, Any], value: Any, depth: int = 0) -> Any:
     if ct == "Reroute":
         if inputs:
             first_key = next(iter(inputs))
-            return _resolve_value(prompt, inputs.get(first_key), depth + 1)
+            return _resolve_value(prompt, inputs.get(first_key), depth + 1, widgets_map=widgets_map)
         return value
 
     if ct == "AbsNode":
-        nested = _resolve_value(prompt, inputs.get("input1"), depth + 1)
+        nested = _resolve_value(prompt, inputs.get("input1"), depth + 1, widgets_map=widgets_map)
         if isinstance(nested, (int, float)) and not isinstance(nested, bool):
             return abs(nested)
         return nested
 
     if ct in {"CLIPTextEncode", "Text Multiline", "CR Text"}:
-        return _resolve_value(prompt, inputs.get("text", ""), depth + 1)
+        return _resolve_value(prompt, inputs.get("text", ""), depth + 1, widgets_map=widgets_map)
 
     if ct == "Text Concatenate":
         delimiter = str(inputs.get("delimiter") or "")
         parts: list[str] = []
         for field in ("text_a", "text_b", "text_c", "text_d"):
-            resolved = _resolve_value(prompt, inputs.get(field), depth + 1)
+            resolved = _resolve_value(prompt, inputs.get(field), depth + 1, widgets_map=widgets_map)
             if _is_link_value(resolved):
                 continue
             if isinstance(resolved, str):
@@ -918,7 +1051,12 @@ def _resolve_value(prompt: dict[str, Any], value: Any, depth: int = 0) -> Any:
         return delimiter.join(parts)
 
     if ct == "Text to Conditioning":
-        return _resolve_value(prompt, inputs.get("text"), depth + 1)
+        return _resolve_value(prompt, inputs.get("text"), depth + 1, widgets_map=widgets_map)
+
+    if "showanything" in ct.lower() or "showtext" in ct.lower():
+        for k in ("anything", "text", "string"):
+            if k in inputs:
+                return _resolve_value(prompt, inputs.get(k), depth + 1, widgets_map=widgets_map)
 
     return value
 
@@ -928,6 +1066,7 @@ def extract_sampler_parameters(
     sampler_id: str,
     sampler_type: str,
     chain_nodes: list[dict[str, Any]],
+    widgets_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """从 API prompt 提取 sampler 参数(seed/steps/cfg/sampler_name/scheduler/denoise)。
 
@@ -945,12 +1084,12 @@ def extract_sampler_parameters(
     # 模式 1:标准 — 参数在自身 inputs
     for field in SAMPLER_PARAM_FIELDS:
         if field in inputs:
-            val = _resolve_value(prompt, inputs.get(field))
+            val = _resolve_value(prompt, inputs.get(field), widgets_map=widgets_map)
             if val is not None and not _is_link_value(val):
                 params[field] = val
 
     # 模式 2:Flux SamplerCustomAdvanced — 分散参数载体
-    if sampler_type == "SamplerCustomAdvanced":
+    if sampler_type in ("SamplerCustomAdvanced", "SamplerCustom"):
         for cn in chain_nodes:
             ct = cn["class_type"]
             cnode = prompt.get(cn["node_id"], {})
@@ -959,28 +1098,28 @@ def extract_sampler_parameters(
             if "noise" in ctl and "seed" not in params:
                 for k in ("noise_seed", "seed"):
                     if k in cinputs:
-                        val = _resolve_value(prompt, cinputs[k])
+                        val = _resolve_value(prompt, cinputs[k], widgets_map=widgets_map)
                         if not _is_link_value(val):
                             params["seed"] = val
                         break
             elif "guider" in ctl:
                 if "cfg" in cinputs and "cfg" not in params:
-                    val = _resolve_value(prompt, cinputs["cfg"])
+                    val = _resolve_value(prompt, cinputs["cfg"], widgets_map=widgets_map)
                     if not _is_link_value(val):
                         params["cfg"] = val
                 if "steps" in cinputs and "steps" not in params:
-                    val = _resolve_value(prompt, cinputs["steps"])
+                    val = _resolve_value(prompt, cinputs["steps"], widgets_map=widgets_map)
                     if not _is_link_value(val):
                         params["steps"] = val
             elif "samplerselect" in ctl or ct == "KSamplerSelect":
                 if "sampler_name" in cinputs and "sampler_name" not in params:
-                    val = _resolve_value(prompt, cinputs["sampler_name"])
+                    val = _resolve_value(prompt, cinputs["sampler_name"], widgets_map=widgets_map)
                     if not _is_link_value(val):
                         params["sampler_name"] = val
             elif "sigma" in ctl or "scheduler" in ctl:
                 for k in ("steps", "denoise", "scheduler"):
                     if k in cinputs and k not in params:
-                        val = _resolve_value(prompt, cinputs[k])
+                        val = _resolve_value(prompt, cinputs[k], widgets_map=widgets_map)
                         if not _is_link_value(val):
                             params[k] = val
 
@@ -1052,6 +1191,11 @@ def extract_prompt_texts(
     traced: list[dict[str, Any]] = []
     for polarity in ("positive", "negative"):
         link = normalize_link(sampler_inputs.get(polarity))
+        if not link and "guider" in sampler_inputs:
+            g_link = normalize_link(sampler_inputs.get("guider"))
+            if g_link:
+                guider_node = prompt.get(g_link[0], {})
+                link = normalize_link((guider_node.get("inputs", {}) or {}).get(polarity))
         if not link:
             continue
         for item in recover_text(
@@ -1166,6 +1310,7 @@ def build_sampler_views(raw_prompt: Any, raw_workflow: Any = None) -> list[dict[
         # 图遍历第一性:从 sampler 所有 input 连线出发,全连通 BFS
         chains: dict[str, list[dict[str, Any]]] = defaultdict(list)
         all_chain_nodes: list[dict[str, Any]] = []
+        all_traversed_nodes: list[dict[str, Any]] = []
         visited: set[str] = set()
         queue: list[tuple[str, str | None]] = []
 
@@ -1185,6 +1330,7 @@ def build_sampler_views(raw_prompt: Any, raw_workflow: Any = None) -> list[dict[
             ct = str(n.get("class_type", ""))
             role = _role_from_class_type(ct) or inherited_role or "other"
             entry = {"node_id": nid, "class_type": ct, "role": role}
+            all_traversed_nodes.append(entry)
             if role != "transparent":
                 chains[role].append(entry)
                 all_chain_nodes.append(entry)
@@ -1197,13 +1343,14 @@ def build_sampler_views(raw_prompt: Any, raw_workflow: Any = None) -> list[dict[
 
         loras = extract_loras_from_chain(all_chain_nodes, raw_prompt, widgets_map)
         loaders = extract_loaders_from_chain(all_chain_nodes, raw_prompt)
-        sampler_params = extract_sampler_parameters(raw_prompt, sid, stype, all_chain_nodes)
+        sampler_params = extract_sampler_parameters(raw_prompt, sid, stype, all_traversed_nodes, widgets_map)
         latent_params = extract_latent_parameters(raw_prompt, all_chain_nodes, sid)
         prompt_texts = extract_prompt_texts(raw_prompt, sid, all_chain_nodes, raw_workflow)
         controlnets = extract_controlnets_from_chain(
             raw_prompt, sid, sampler_params, all_chain_nodes
         )
         regions = extract_region_views(raw_prompt, sid, all_chain_nodes)
+        mask_scopes = extract_mask_scopes(raw_prompt, sid, all_chain_nodes)
         if isinstance(raw_workflow, dict):
             bypassed_cns = extract_bypassed_controlnets_from_workflow(raw_workflow)
         else:
@@ -1249,6 +1396,7 @@ def build_sampler_views(raw_prompt: Any, raw_workflow: Any = None) -> list[dict[
                 "controlnets": controlnets,
                 "bypassed_controlnets": bypassed_cns,
                 "regions": regions,
+                "mask_scopes": mask_scopes,
                 "unknown_nodes": unknown,
             }
         )

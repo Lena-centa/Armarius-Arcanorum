@@ -1,0 +1,170 @@
+/*
+ * 设置页专属 MD3 视觉层
+ * 作用域: 仅限本页组件(.settings-groups, .settings-panel, .settings-panel-head,
+ *        .settings-grid, .settings-field, .settings-hint, .settings-effective-note,
+ *        .settings-action-bar, .settings-raw-view, .settings-mongo-test,
+ *        .settings-engine-badge, .state-dot, .summary-value), 共享组件在 styles.css。
+ *
+ * 密度约束: 字段为紧凑型; 动态配置字段的 name/key 结构不动;
+ *   hint/effective-note 保持 11-12px; 底部固定操作栏不遮挡最后一个字段。
+ * 禁止: 改动 HTML 结构、ID、class 或 data 属性; 改动 JS。
+ * 窄屏(<=760px): settings-grid 已单列; 底部栏允许换行但必须可见。
+ */
+
+/* 1. 可折叠组头(role=button):键盘焦点与 hover 视觉对齐 */
+.settings-panel-head:focus-visible {
+  color: var(--accent-text);
+}
+
+/* 2. 字段 is-dirty */
+.settings-field select.is-dirty {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.settings-field select.is-dirty:focus {
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* 3. 生效提示:文字改用 warning-strong */
+.settings-effective-note {
+  color: var(--warning-strong, #8a5a00);
+}
+
+/* 4. 数据目录与路径展示:保证全宽自适应、无溢出、无挤占 */
+#dataDirPanel .settings-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.settings-value-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
+.settings-value-line .state-dot {
+  flex-shrink: 0;
+  margin-right: 0 !important;
+}
+
+.settings-value-line code {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--input-bg, var(--surface));
+  padding: 3px 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+}
+
+.settings-value-extra {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  padding: 1px 7px;
+  border-radius: 10px;
+  line-height: 18px;
+}
+
+#dataDirPanel .settings-mongo-test {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* 4+8. 窄屏操作栏:按钮容器允许换行(flex-wrap),按钮文本不折行截断;
+ *    换行后固定栏变高,同步加大底部留白,确保不遮挡最后一个字段 */
+@media (max-width: 760px) {
+  .settings-action-buttons {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .settings-action-bar .action {
+    white-space: nowrap;
+  }
+
+  .settings-groups {
+    padding-bottom: 120px;
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-groups {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 8px 132px;
+  }
+
+  .settings-panel,
+  .settings-grid,
+  .settings-field,
+  .settings-field label,
+  .settings-value-line,
+  .settings-value-line code {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .settings-panel {
+    padding: 10px;
+  }
+
+  .settings-value-line {
+    display: flex;
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .settings-value-line code,
+  .settings-hint,
+  .settings-effective-note {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .settings-field input,
+  .settings-field select,
+  .settings-field textarea {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .settings-action-bar {
+    padding: 8px;
+  }
+
+  .settings-action-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .settings-action-bar .action,
+  .settings-save-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding-inline: 8px;
+  }
+}

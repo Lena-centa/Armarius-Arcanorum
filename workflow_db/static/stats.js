@@ -242,17 +242,21 @@ async function bootStats() {
     });
   });
 
-  // 焦点 LoRA 统一使用 combo 候选组件
-  (window.aaLoraCombo || window.wfdbLoraCombo)({
-    input: document.getElementById("statsFocusLoraInput"),
-    menu: document.getElementById("statsFocusLoraMenu"),
-    toggle: document.getElementById("statsFocusLoraToggle"),
-    getOptions: () => statsState.options?.loras || [],
-    onSelect: (value) => {
-      document.getElementById("statsFocusLoraInput").value = value;
-      refresh();
-    },
-  });
+  // 焦点 LoRA 统一使用 combo 候选组件(存在性守卫:工厂缺失时跳过绑定,
+  // 避免 TypeError 中断整页 boot)
+  const statsComboFactory = window.aaLoraCombo || window.wfdbLoraCombo;
+  if (typeof statsComboFactory === "function") {
+    statsComboFactory({
+      input: document.getElementById("statsFocusLoraInput"),
+      menu: document.getElementById("statsFocusLoraMenu"),
+      toggle: document.getElementById("statsFocusLoraToggle"),
+      getOptions: () => statsState.options?.loras || [],
+      onSelect: (value) => {
+        document.getElementById("statsFocusLoraInput").value = value;
+        refresh();
+      },
+    });
+  }
 
   // 基座模型筛选:输入即筛选(输入串为子串匹配,多 checkpoint 命中全部返回);
   // 候选下拉仅用于点击精确选择;Enter/Escape/外部点击仅收拢菜单不还原输入
@@ -374,7 +378,8 @@ async function bootStats() {
 // 与主页 app.js 同源交互的精简版:切段标注(danbooru-seg)与浮层全部复用
 // styles.css 现成样式;浮层仅保留 head(名/中文/类型/帖数)+特征摘要+wiki
 // 链接,数据来自 /api/tag-related;danbooru 资产未启用时静默降级为纯标注。
-// 不含主页的 pin/拖拽/缩放/快速标注/收藏(依赖主页面状态,统计页无此场景)。
+// 不含主页的 pin/拖拽/缩放/收藏(依赖主页面状态);选中文本快速标注
+// 为下方独立模块,不在此浮层内。
 
 const STATS_DANBOORU_TYPE_LABELS = {
   general: "特征",
@@ -577,7 +582,9 @@ function statsPanelHtml(tag, payload) {
   return `${header}<div class="danbooru-panel-body">${body}</div>${foot}`;
 }
 
-// 帖子数紧凑显示(与主页 formatCountCompact 同义:1.2w / 3450)
+// 帖子数紧凑显示:万制缩写 + 千分位(1.2w / 3,450)。
+// 注意与主页 formatCountCompact(k/M 制:1.2M / 3.4k / 3450)格式不同,
+// 统一两者前不要改此注释单独描述。
 function statsFormatCount(value) {
   const n = Number(value) || 0;
   return n >= 10000 ? `${(n / 10000).toFixed(1)}w` : n.toLocaleString();
@@ -784,7 +791,8 @@ function statsQaOpenPanel(text, x, y) {
       }
       showToast("已保存到标注库", { type: "success", duration: 1600 });
       statsQaClosePanel();
-      // 刷新标记索引并重渲染,新词条染色立即生效(与主页 saveQuickAnnotate 一致)
+      // 刷新标记索引并重渲染(主页 saveQuickAnnotate 仅刷新索引,染色在
+      // 下次渲染生效;统计页此处额外立即重渲染,新词条当场可见)
       await loadStatsTagCatalog();
       await loadStatsPage();
     } catch (error) {

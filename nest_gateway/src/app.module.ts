@@ -6,6 +6,7 @@
  *   - 注册全局定时任务基础设施(ScheduleModule)
  *   - 注册 Mongo 连接(MongooseModule;SQLite 单引擎下为惰性占位连接)
  *   - 挂载业务模块:health(健康检查)/ static(静态资源)/
+ *     comfy-proxy(内嵌 ComfyUI 同源反向代理)/
  *     parse(解析)/ generate(生成)/ stats(统计)/ orchestration(编排)/
  *     images(批次查询)/ labels(标注)/ settings(设置)/
  *     tags(tag 补全参考)/ sqlite(本地 SQLite 引擎)
@@ -21,6 +22,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
 import { join } from 'path';
 import { configuration, resolveDataDir } from './config';
+import { ComfyProxyModule } from './common/comfy-proxy/comfy-proxy.module';
 import { GenerateModule } from './modules/generate/generate.module';
 import { HealthModule } from './modules/health/health.module';
 import { ImagesModule } from './modules/images/images.module';
@@ -33,6 +35,7 @@ import { StaticModule } from './modules/static/static.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { TagsModule } from './modules/tags/tags.module';
 import { SqliteModule } from './sqlite/sqlite.module';
+import { LineageModule } from './modules/lineage/lineage.module';
 
 // 数据目录(env 与主库的外置存放点);平台专属环境文件优先于共享 .env
 // (Windows 原生进程读 .env.windows,WSL / Linux 读 .env.wsl,
@@ -86,6 +89,7 @@ const platformEnvFile = join(
     // ---- 业务模块 ----
     HealthModule,
     StaticModule,
+    ComfyProxyModule,
     ParseModule,
     GenerateModule,
     StatsModule,
@@ -95,6 +99,7 @@ const platformEnvFile = join(
     FavoritesModule,
     SettingsModule,
     TagsModule,
+    LineageModule,
     SqliteModule,
   ],
 })

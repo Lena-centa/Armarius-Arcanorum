@@ -14,9 +14,9 @@
     </script>
     <title>Armarius Arcanorum</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="/static/vendor/flatpickr/flatpickr.min.css?v=0.1.0-beta.1" />
-    <link rel="stylesheet" href="/static/styles.css?v=0.1.0-beta.1" />
-    <link rel="stylesheet" href="/static/index.css?v=0.1.0-beta.1" />
+    <link rel="stylesheet" href="/static/vendor/flatpickr/flatpickr.min.css?v=0.1.0-beta.2" />
+    <link rel="stylesheet" href="/static/styles.css?v=0.1.0-beta.2" />
+    <link rel="stylesheet" href="/static/index.css?v=0.1.0-beta.2" />
   </head>
   <body>
     <div class="app-shell">
@@ -256,6 +256,8 @@
             <div id="imagePreviewMeta" class="muted"></div>
           </div>
           <div class="image-preview-actions">
+            <button id="previewFavBtn" class="ghost-btn" type="button" aria-pressed="false" hidden title="收藏当前图(未分类);再点取消">★ 收藏</button>
+            <input id="previewFavNote" class="preview-fav-note" type="text" maxlength="200" placeholder="备注(收藏到未分类)" hidden title="回车或失焦保存;保存时会先收藏到未分类" />
             <a id="previewGenerateLink" class="ghost-btn" href="/generate">去生成</a>
             <button id="copyPositiveBtn" class="ghost-btn" type="button">复制正向 Prompt</button>
             <button id="copyWorkflowBtn" class="ghost-btn" type="button" hidden>复制工作流</button>
@@ -302,11 +304,11 @@
         <div class="selection-panel-grid" id="selectionPanelGrid"></div>
       </aside>
     </div>
-    <script src="/static/vendor/flatpickr/flatpickr.min.js?v=0.1.0-beta.1"></script>
-    <script src="/static/vendor/flatpickr/zh.js?v=0.1.0-beta.1"></script>
-    <script src="/static/common.js?v=0.1.0-beta.1"></script>
-    <script src="/static/enrichment_view.js?v=0.1.0-beta.1"></script>
-    <script src="/static/transient_preview.js?v=0.1.0-beta.1"></script>
-    <script src="/static/app.js?v=0.1.0-beta.1"></script>
+    <script src="/static/vendor/flatpickr/flatpickr.min.js?v=0.1.0-beta.2"></script>
+    <script src="/static/vendor/flatpickr/zh.js?v=0.1.0-beta.2"></script>
+    <script src="/static/common.js?v=0.1.0-beta.2"></script>
+    <script src="/static/enrichment_view.js?v=0.1.0-beta.2"></script>
+    <script src="/static/transient_preview.js?v=0.1.0-beta.2"></script>
+    <script src="/static/app.js?v=0.1.0-beta.2"></script>
   </body>
 </html>

@@ -674,8 +674,8 @@ export function statsSummary(
  *   dateBounds: { first_date, last_date, avg_steps, avg_cfg }(空统计键不出现)
  * }
  *
- * 数据来源:batches 主表聚合(COUNT / GROUP BY)与 doc_json 内嵌
- * samplers[0] 的 AVG(JSON1 函数 json_extract)。
+ * 数据来源:batches 主表聚合(COUNT / GROUP BY)与**物化列**
+ * sampler_steps / sampler_cfg 的 AVG(不再对 doc_json 做 JSON1 全表扫描)。
  */
 export function statsOverview(db: Database.Database): {
   totalImages: number;
@@ -716,8 +716,8 @@ export function statsOverview(db: Database.Database): {
   const bounds = db
     .prepare(
       `SELECT MIN(created_date) AS first_date, MAX(created_date) AS last_date,
-              AVG(json_extract(doc_json, '$.samplers[0].steps')) AS avg_steps,
-              AVG(json_extract(doc_json, '$.samplers[0].cfg')) AS avg_cfg
+              AVG(sampler_steps) AS avg_steps,
+              AVG(sampler_cfg) AS avg_cfg
        FROM batches WHERE has_positive = 1`,
     )
     .get() as { first_date: string | null; last_date: string | null; avg_steps: number | null; avg_cfg: number | null };

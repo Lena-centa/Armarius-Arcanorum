@@ -478,6 +478,8 @@ export async function ingest(
     skipMongo?: boolean;
     /** 多网关实例打标:逐图片写入 source{instance_id,base_url}。 */
     instance?: InstanceStamp;
+    /** 成功入库后执行的单图后处理(血缘等);失败不回滚主数据。 */
+    onRecordWritten?: (record: Record<string, unknown>) => Promise<void>;
   } = {},
 ): Promise<IngestSummary> {
   const limit = options.limit ?? 0;
@@ -486,6 +488,7 @@ export async function ingest(
   const onProgress = options.onProgress;
   const sqliteDb = options.sqliteDb;
   const skipMongo = options.skipMongo ?? false;
+  const recordsForPostWrite: Array<Record<string, unknown>> = [];
 
   // ---- 统计计数(扫描循环 + 清理阶段累计,最终并入 summary) ----
   let discovered = 0;
@@ -815,6 +818,7 @@ export async function ingest(
     try {
       const record = await parseFn(entry.path, scanRoot);
       parsed += 1;
+      recordsForPostWrite.push(record);
 
       // B3.3 zod 运行时校验(守护):parser 产出结构漂移时告警,不阻断写入
       const check = validateRecord(record);
@@ -1217,6 +1221,16 @@ export async function ingest(
         recipeGroupModel,
         [...affectedRecipeKeys],
       )) as unknown as Record<string, unknown>;
+    }
+  }
+
+  if (options.onRecordWritten) {
+    for (const record of recordsForPostWrite) {
+      try {
+        await options.onRecordWritten(record);
+      } catch {
+        // Additive post-processing must never turn a successful ingest into a failure.
+      }
     }
   }
 

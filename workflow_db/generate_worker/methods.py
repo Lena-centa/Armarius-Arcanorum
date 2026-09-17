@@ -105,7 +105,11 @@ def _build_replay_source(params: dict[str, Any]) -> dict[str, Any]:
     except KeyError as exc:
         raise ProtocolError(ERR_SOURCE_NOT_FOUND, f"image not found: {exc}") from exc
     except ValueError as exc:
-        raise ProtocolError(ERR_SOURCE_NOT_FOUND, str(exc)) from exc
+        # 其余 ValueError(典型:A1111/无元数据的 "embedded prompt/workflow is
+        # unavailable")是"来源不支持重放",不是"图不存在"——图明明在库内。
+        # 必须归 ERR_REPLAY_UNSUPPORTED(网关 422 + 原文案),404 只留给
+        # 真的不存在的图(按 sha 查不到 batch/目标图,走上面的 KeyError)。
+        raise ProtocolError(ERR_REPLAY_UNSUPPORTED, str(exc)) from exc
     except RuntimeError as exc:
         msg = str(exc)
         if "HTTP" in msg:
@@ -184,6 +188,8 @@ def _cn_summary(cn: dict[str, Any]) -> dict[str, Any]:
         "node_type": cn.get("node_type") or cn.get("apply_type") or cn.get("loader_type"),
         "loader_node_id": cn.get("loader_node_id"),
         "name": cn.get("control_net_name") or cn.get("name", ""),
+        "loader_model_source": cn.get("loader_model_source"),
+        "source_chain": cn.get("source_chain"),
         "strength": cn.get("strength"),
         "start_percent": cn.get("start_percent"),
         "end_percent": cn.get("end_percent"),
@@ -218,8 +224,11 @@ def _extract_derived_summary(params: dict[str, Any]) -> dict[str, Any]:
         raise ProtocolError(INVALID_PARAMS, "sha256 must be a non-empty string")
     try:
         source = build_replay_source(doc, sha256, _OfflineObjectInfoClient())
-    except (KeyError, ValueError) as exc:
+    except KeyError as exc:
         raise ProtocolError(ERR_SOURCE_NOT_FOUND, str(exc)) from exc
+    except ValueError as exc:
+        # 同 build_replay_source:来源不支持(含 UI-only blueprint)≠ 图不存在
+        raise ProtocolError(ERR_REPLAY_UNSUPPORTED, str(exc)) from exc
     except RuntimeError as exc:
         msg = str(exc)
         if "HTTP" in msg:
@@ -229,6 +238,7 @@ def _extract_derived_summary(params: dict[str, Any]) -> dict[str, Any]:
     return {
         "controlnets": [_cn_summary(c) for c in editable.get("controlnets", [])],
         "regions": editable.get("regions", []),
+        "mask_scopes": editable.get("mask_scopes", []),
         "node_graph": source.get("node_graph", {}),
     }
 

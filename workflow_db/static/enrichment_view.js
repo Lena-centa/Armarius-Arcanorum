@@ -34,7 +34,9 @@
     if (semantic === "unavailable" || diagnostics?.outcome === "unavailable") {
       return { key: "unavailable", label: "无法完整解析" };
     }
-    return { key: "unknown", label: "解析状态未知" };
+    // 兜底:缺 semantic_parse(典型原因 = ComfyUI 未安装该节点、拿不到节点定义,
+    // 或该记录早于诊断层)。文案点明"为什么判不了",不写含糊的"解析状态未知"。
+    return { key: "unknown", label: "未能判定(缺节点定义)" };
   }
 
   function unknownNodeLabel(node) {
@@ -134,7 +136,9 @@
       ? "补全字段仅用于当前展示，原始解析记录未被修改。"
       : status.key === "unavailable"
         ? "未获得可用的工作流语义信息，已保留原始解析结果。"
-        : "";
+        : status.key === "unknown"
+          ? "缺少节点定义或诊断信息（常见原因：ComfyUI 未安装该自定义节点），无法判定解析完整度；原始解析结果不受影响，展开诊断可见未覆盖字段与未知节点。"
+          : "";
     return `<section class="detail-section detail-enrichment detail-enrichment--${status.key}">
       <div class="detail-enrichment-head"><h3>工作流解析</h3><span class="detail-enrichment-status">${status.label}</span></div>
       ${hint ? `<div class="detail-enrichment-hint">${escapeHtml(hint)}</div>` : ""}

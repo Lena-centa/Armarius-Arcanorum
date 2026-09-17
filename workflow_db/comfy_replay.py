@@ -4,6 +4,7 @@ import copy
 import json
 import random
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +23,61 @@ CHECKPOINT_FIELDS = ("ckpt_name", "unet_name", "model_name", "clip_name", "vae_n
 SAMPLER_FIELDS = ("seed", "noise_seed", "steps", "cfg", "sampler_name", "scheduler", "denoise", "preview_method", "vae_decode")
 LATENT_FIELDS = ("width", "height", "batch_size")
 LORA_NAME_FIELDS = ("lora_name", "lora")
+
+# 文件字段 → 远端模型文件夹类型候选。远端词表以 /api/models 为准(动态),
+# 版本迁移容错:unet_name 旧版在 "unet" 目录,新版在 "diffusion_models"。
+MODEL_FIELD_FOLDER_CANDIDATES = {
+    "ckpt_name": ("checkpoints",),
+    "unet_name": ("diffusion_models", "unet"),
+    "model_name": ("checkpoints", "diffusion_models", "unet"),
+}
+
+# 节点类型 → 模型文件夹(比字段名精确)。field 会把不同节点混在一起:
+# UltralyticsDetectorProvider / SAMLoader / UpscaleModelLoader 都用 model_name,
+# 只按字段名找会去 checkpoints/diffusion_models/unet 里翻检测与放大模型 ——
+# 候选列表给错、存在性判定也会假缺失。未知节点类型回退 MODEL_FIELD_* 表。
+NODE_TYPE_FOLDER_CANDIDATES = {
+    "CheckpointLoaderSimple": ("checkpoints",),
+    "CheckpointLoader": ("checkpoints",),
+    "CheckpointLoader|pysssss": ("checkpoints",),
+    "ECHOCheckpointLoaderSimple": ("checkpoints",),
+    "UNETLoader": ("diffusion_models", "unet"),
+    "UnetLoaderGGUF": ("diffusion_models", "unet"),
+    "UpscaleModelLoader": ("upscale_models",),
+    "easy hiresFix": ("upscale_models",),
+    "SAMLoader": ("sams",),
+    "UltralyticsDetectorProvider": ("ultralytics", "ultralytics_bbox", "ultralytics_segm"),
+    "YoloDetectorProvider": ("ultralytics", "ultralytics_bbox", "ultralytics_segm"),
+}
+
+
+def model_folder_candidates(node_type: str | None, field: str | None) -> tuple[str, ...]:
+    """该 loader 用到的模型文件夹:先按节点类型定,未知类型再按字段名兜底。"""
+    by_type = NODE_TYPE_FOLDER_CANDIDATES.get(str(node_type or ""))
+    if by_type:
+        return by_type
+    return MODEL_FIELD_FOLDER_CANDIDATES.get(str(field or ""), ())
+
+
+LORA_FOLDER_CANDIDATES = ("loras",)
+CONTROLNET_FOLDER_CANDIDATES = ("controlnet",)
+
+# 远端模型清单的进程内缓存 TTL(秒)。抓一次要 /api/models + 每个 folder 一次,
+# 而 build_replay_source 在详情页、列表批量摘要、重放编辑器三条路径上都会经过,
+# TTL 内复用可把重复往返压成一次。失败同样缓存但用更短的 TTL:
+# 对端不可达时不必每个请求都等 15s 超时,对端恢复后也能较快重试。
+REMOTE_MODEL_INDEX_TTL_SECONDS = 60.0
+REMOTE_MODEL_INDEX_FAILURE_TTL_SECONDS = 10.0
+# key = (client.base_url, 排序后的 folder 元组)。folder 集合取自固定的
+# MODEL/LORA/CONTROLNET_FOLDER_CANDIDATES,取值有限,不会无限增长。
+_remote_model_index_cache: dict[
+    tuple[str, tuple[str, ...]], tuple[float, dict[str, list[str]] | None]
+] = {}
+
+
+def clear_remote_model_index_cache() -> None:
+    """清空远端模型清单缓存(测试与手动刷新用)。"""
+    _remote_model_index_cache.clear()
 
 
 class ReplayUnsupportedError(ValueError):
@@ -410,6 +466,112 @@ def fetch_object_info(client: ComfyClient, node_types: set[str]) -> dict[str, An
     return info
 
 
+def _fetch_remote_model_index_uncached(
+    client: ComfyClient, folders: set[str]
+) -> dict[str, list[str]] | None:
+    try:
+        vocabulary = client.get_json("/api/models")
+    except Exception:
+        return None
+    if not isinstance(vocabulary, list):
+        return None
+    index: dict[str, list[str]] = {}
+    for folder in sorted(set(folders)):
+        if folder not in vocabulary:
+            continue
+        try:
+            encoded = urllib.parse.quote(folder, safe="")
+            files = client.get_json(f"/api/models/{encoded}")
+        except Exception:
+            continue
+        if isinstance(files, list):
+            index[folder] = [str(name) for name in files if isinstance(name, str)]
+    return index
+
+
+def fetch_remote_model_index(
+    client: ComfyClient, folders: set[str], *, ttl: float | None = None
+) -> dict[str, list[str]] | None:
+    """从远端 /api/models 抓取所需文件夹类型的模型名单(尽力而为,带 TTL 缓存)。
+
+    返回 {folder: [name...]};/api/models 不可达或响应异常时返回 None,
+    调用方回退到 object_info 选项并把存在性标记置为未知,不阻断重放编辑器。
+
+    ttl 覆盖默认 TTL(秒);传 0 可强制本次直读远端(测试/手动刷新用)。
+    """
+    key = (str(getattr(client, "base_url", "")), tuple(sorted(set(folders))))
+    limit = REMOTE_MODEL_INDEX_TTL_SECONDS if ttl is None else ttl
+    cached = _remote_model_index_cache.get(key)
+    if cached is not None:
+        cached_at, cached_value = cached
+        age = time.monotonic() - cached_at
+        if cached_value is None:
+            # 失败结果用更短 TTL:不可达时避免每请求等超时,恢复后能较快重试
+            limit = min(limit, REMOTE_MODEL_INDEX_FAILURE_TTL_SECONDS)
+        if age < limit:
+            return cached_value
+    value = _fetch_remote_model_index_uncached(client, folders)
+    _remote_model_index_cache[key] = (time.monotonic(), value)
+    return value
+
+
+def _normalize_model_ref(value: str) -> str:
+    """模型引用归一:子目录分隔符统一为 "/"。
+
+    实测(本机 ComfyUI 0.35,/models/loras)返回的是 ``os.sep`` 拼出的路径 ——
+    Windows 上给的是反斜杠 ``sub\\x.safetensors``;而工作流/存档记录里两种写法
+    并存(同一运行时库里既有 ``Anima\\x.safetensors`` 也有 ``bbox/y.pt``)。
+    不归一就会把远端确实存在的文件判成"缺失"。
+
+    只在**比较**两侧归一:options 仍是远端原样字符串,避免改写后与远端自身的
+    校验词表对不上。
+    """
+    return str(value).strip().replace("\\", "/")
+
+
+def exists_on_remote(
+    index: dict[str, list[str]] | None,
+    candidates: tuple[str, ...] | list[str],
+    value: Any,
+) -> bool | None:
+    """value 是否存在于远端任一候选文件夹。index=None 或值缺失时返回 None(未知)。"""
+    if index is None or not isinstance(value, str) or not value:
+        return None
+    known = [folder for folder in candidates if folder in index]
+    if not known:
+        return None
+    probe = _normalize_model_ref(value)
+    return any(
+        probe in {_normalize_model_ref(name) for name in index[folder]}
+        for folder in known
+    )
+
+
+def present_model_names(
+    index: dict[str, list[str]] | None,
+    candidates: tuple[str, ...] | list[str],
+) -> list[str] | None:
+    """远端该类模型的全部存在名(已归一),供前端对**候选列表**着色。
+
+    与 exists_on_remote 的区别:后者判定**单个值**,本函数回传**基准集合**本身。
+    为什么不能只回传逐项布尔:网关在 worker 返回空 options 时会用归档库兜底填充
+    (generate.controller.getSource),那条路径上网关手里没有远端清单,无法自行
+    判定"这个归档里的名字远端有没有"。回传基准即让任一层都能算。
+
+    @returns 归一化后的名字(排序去重);**不可判定时 None**(而非 [])——
+             空列表会被前端理解成"一个都不存在",在远端离线或未安装该类型模型时
+             把整列误涂成缺失。三态语义与 exists_on_remote 保持一致。
+    """
+    if index is None:
+        return None
+    known = [folder for folder in candidates if folder in index]
+    if not known:
+        return None
+    return sorted(
+        {_normalize_model_ref(name) for folder in known for name in index[folder]}
+    )
+
+
 def push_workflow_to_comfyui(
     client: ComfyClient, workflow: dict[str, Any], filename: str
 ) -> dict[str, Any]:
@@ -475,6 +637,27 @@ def prompt_node_text(prompt: dict[str, Any], node_id: str, node_type: str, fallb
     if isinstance(resolved, str) and resolved.strip():
         return resolved
     return fallback
+
+
+def node_display_label(
+    workflow_node: dict[str, Any] | None,
+    prompt_node: dict[str, Any] | None,
+    fallback: str,
+) -> str:
+    """节点显示名:一律取原始类型名(UI 节点 type / API class_type)。
+
+    不取 `_meta.title` 与 UI 节点的 `title`:那是 ComfyUI 前端按**当前界面语言**
+    写进工作流的本地化名(中文界面下即「Checkpoint加载器(简易)」这类文本),
+    不是节点真实类型。节点名保持原样展示,不做翻译。
+
+    参数顺序沿用原回退链:UI 节点 type → API 节点 class_type → 调用方兜底
+    (如 loader/source 描述)。API-only 来源没有 UI 节点时自然落到 class_type。
+    """
+    return (
+        (workflow_node or {}).get("type")
+        or (prompt_node or {}).get("class_type")
+        or fallback
+    )
 
 
 def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyClient) -> dict[str, Any]:
@@ -556,14 +739,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             if _nid in seen_checkpoint_ids:
                 continue  # 共享 loader 跨 sampler 只出 1 条(双 sampler 去重)
             seen_checkpoint_ids.add(_nid)
-            _node = prompt.get(_nid, {}) or {}
             _wfn = workflow_nodes.get(_nid) or {}
-            _label = (
-                (_node.get("_meta") or {}).get("title")
-                or _wfn.get("title")
-                or _wfn.get("type")
-                or _ld["class_type"]
-            )
+            _label = node_display_label(_wfn, prompt.get(_nid), _ld["class_type"])
             checkpoints.append(
                 {
                     "node_id": _nid,
@@ -582,14 +759,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             if _key in seen_lora_keys:
                 continue
             seen_lora_keys.add(_key)
-            _node = prompt.get(_nid, {}) or {}
             _wfn = workflow_nodes.get(_nid) or {}
-            _label = (
-                (_node.get("_meta") or {}).get("title")
-                or _wfn.get("title")
-                or _wfn.get("type")
-                or _l.get("source", "")
-            )
+            _label = node_display_label(_wfn, prompt.get(_nid), _l.get("source", ""))
             loras.append(
                 {
                     "node_id": _nid,
@@ -608,14 +779,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
         # samplers: 从 sampler_params 取(标准/Flux分散/UmeAiRT封装)
         _sid = _sv["sampler_id"]
         _stype = _sv["sampler_type"]
-        _snode = prompt.get(_sid, {}) or {}
         _swfn = workflow_nodes.get(_sid) or {}
-        _slabel = (
-            (_snode.get("_meta") or {}).get("title")
-            or _swfn.get("title")
-            or _swfn.get("type")
-            or _stype
-        )
+        _slabel = node_display_label(_swfn, prompt.get(_sid), _stype)
         _sentry: dict[str, Any] = {"node_id": _sid, "label": _slabel, "node_type": _stype}
         _sentry.update(_sv["sampler_params"])
         _schema = object_info.get(_stype, {})
@@ -631,14 +796,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             if _nid in seen_latent_ids:
                 continue  # 共享 latent 源跨 sampler 只出 1 条(双 sampler 去重)
             seen_latent_ids.add(_nid)
-            _node = prompt.get(_nid, {}) or {}
             _wfn = workflow_nodes.get(_nid) or {}
-            _label = (
-                (_node.get("_meta") or {}).get("title")
-                or _wfn.get("title")
-                or _wfn.get("type")
-                or _lp["class_type"]
-            )
+            _label = node_display_label(_wfn, prompt.get(_nid), _lp["class_type"])
             _lentry: dict[str, Any] = {"node_id": _nid, "label": _label, "node_type": _lp["class_type"]}
             for _field in LATENT_FIELDS:
                 if _field in _lp:
@@ -651,14 +810,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             if _nid in seen_prompt_keys:
                 continue
             seen_prompt_keys.add(_nid)
-            _node = prompt.get(_nid, {}) or {}
             _wfn = workflow_nodes.get(_nid) or {}
-            _label = (
-                (_node.get("_meta") or {}).get("title")
-                or _wfn.get("title")
-                or _wfn.get("type")
-                or _pt["class_type"]
-            )
+            _label = node_display_label(_wfn, prompt.get(_nid), _pt["class_type"])
             prompts.append(
                 {
                     "node_id": _nid,
@@ -676,15 +829,12 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             _aid = _cn["apply_node_id"]
             _lnid = _cn.get("loader_node_id")
             _key = _aid if _lnid else f"apply-{_aid}"
-            _node = prompt.get(_aid, {}) or {}
             _wfn = workflow_nodes.get(_aid) or {}
             _lwfn = workflow_nodes.get(_lnid) if _lnid else None
-            _label = (
-                (_node.get("_meta") or {}).get("title")
-                or _wfn.get("title")
-                or (_lwfn or {}).get("title")
-                or (_lwfn or {}).get("type")
-                or _cn["apply_type"]
+            _label = node_display_label(
+                _wfn,
+                prompt.get(_aid),
+                (_lwfn or {}).get("type") or _cn["apply_type"],
             )
             entry = controlnets.setdefault(
                 _key,
@@ -695,6 +845,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
                     "loader_node_id": _lnid,
                     "loader_type": _cn.get("loader_type"),
                     "name": _cn.get("control_net_name", ""),
+                    "loader_model_source": _cn.get("loader_model_source"),
+                    "source_chain": _cn.get("source_chain"),
                     "strength": _cn.get("strength"),
                     "start_percent": _cn.get("start_percent"),
                     "end_percent": _cn.get("end_percent"),
@@ -710,7 +862,7 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
         for _bc in _sv["bypassed_controlnets"]:
             _lnid = _bc["loader_node_id"]
             _wfn = workflow_nodes.get(_lnid) or {}
-            _label = _wfn.get("title") or _wfn.get("type") or _bc["loader_type"]
+            _label = _wfn.get("type") or _bc["loader_type"]
             bypassed_controlnets.setdefault(
                 _lnid,
                 {
@@ -733,14 +885,8 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
         for _rg in _sv["regions"]:
             _nid = _rg["node_id"]
             _sid = _rg["sampler_id"]
-            _node = prompt.get(_nid, {}) or {}
             _wfn = workflow_nodes.get(_nid) or {}
-            _label = (
-                (_node.get("_meta") or {}).get("title")
-                or _wfn.get("title")
-                or _wfn.get("type")
-                or _rg["node_type"]
-            )
+            _label = node_display_label(_wfn, prompt.get(_nid), _rg["node_type"])
             mask = _rg.get("mask") or {}
             mask_nodes = [
                 {
@@ -768,12 +914,68 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             if _sid not in entry["sampler_ids"]:
                 entry["sampler_ids"].append(_sid)
 
-    checkpoint_options: list[str] = []
+    # mask_scopes:独立遮罩范围(条件/inpaint/区域 mask 链),按 scope 溯源去重
+    mask_scopes: dict[tuple[str, str], dict[str, Any]] = {}
+    for _sv in build_sampler_views(prompt, raw_workflow):
+        _sv_sid = _sv.get("sampler_id", "")
+        for _ms in _sv.get("mask_scopes", []) or []:
+            _consumer = _ms.get("consumer_node_id", "")
+            _field = _ms.get("input_field", "")
+            _scope = _ms.get("scope") or {}
+            _source = _scope.get("source")
+            _key = (str(_consumer), str(_field))
+            entry = mask_scopes.setdefault(
+                _key,
+                {
+                    "consumer_node_id": _consumer,
+                    "consumer_type": _ms.get("consumer_type", ""),
+                    "input_field": _field,
+                    "consumer_params": _ms.get("consumer_params", {}) or {},
+                    "scope": _scope,
+                    "sampler_ids": [],
+                },
+            )
+            if _sv_sid not in entry["sampler_ids"]:
+                entry["sampler_ids"].append(_sv_sid)
+
+    # 远端模型清单(尽力而为):options 全量候选 + 行级存在性标记。
+    # 只抓工作流实际引用的文件夹类型,避免按 /api/models 全部类型轮询。
+    _model_folders_needed: list[str] = []
+    for _c in checkpoints:
+        for _folder in model_folder_candidates(_c.get("node_type"), _c.get("field")):
+            if _folder not in _model_folders_needed:
+                _model_folders_needed.append(_folder)
+    _folder_needs: set[str] = set(_model_folders_needed)
+    if loras:
+        _folder_needs.add(LORA_FOLDER_CANDIDATES[0])
+    if controlnets or bypassed_controlnets:
+        _folder_needs.add(CONTROLNET_FOLDER_CANDIDATES[0])
+    remote_index = fetch_remote_model_index(client, _folder_needs)
+    for _c in checkpoints:
+        _c["exists_on_remote"] = exists_on_remote(
+            remote_index,
+            model_folder_candidates(_c.get("node_type"), _c.get("field")),
+            _c.get("value"),
+        )
+    for _l in loras:
+        _l["exists_on_remote"] = exists_on_remote(remote_index, LORA_FOLDER_CANDIDATES, _l.get("name"))
+    for _e in list(controlnets.values()) + list(bypassed_controlnets.values()):
+        _e["exists_on_remote"] = exists_on_remote(remote_index, CONTROLNET_FOLDER_CANDIDATES, _e.get("name"))
+
+    # 候选:每张卡片自带按自身文件夹的清单(远端清单优先,其次 object_info 枚举)。
+    # 字段**缺省**表示"这张卡没有自己的候选"(远端与枚举都拿不到或该文件夹为空),
+    # 前端据此回退整表并集 options.checkpoints(网关用归档库兜底填充的正是它)。
+    # candidates 与其基准 candidates_baseline **成对使用**:卡自带清单非空时用
+    # 卡自己的清单+基准,否则清单与基准一起回退并集,避免拿 A 卡的基准给 B 卡的
+    # 候选着色(None = 不可判定,前端不着色)。
     for item in checkpoints:
         schema = object_info.get(item["node_type"], {})
         spec = input_specs(schema).get(item["field"])
-        if isinstance(spec, list) and spec and isinstance(spec[0], list):
-            checkpoint_options.extend(spec[0])
+        enum = list(spec[0]) if (isinstance(spec, list) and spec and isinstance(spec[0], list)) else []
+        if enum:
+            item["candidates"] = enum
+            item["candidates_baseline"] = None  # 无远端清单 → 未知,不着色
+    checkpoint_options: list[str] = [name for item in checkpoints for name in item.get("candidates", [])]
     lora_options: list[str] = []
     for item in loras:
         schema = object_info.get(item["node_type"], {})
@@ -784,9 +986,48 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             spec = input_specs(schema).get("lora_name")
         if isinstance(spec, list) and spec and isinstance(spec[0], list):
             lora_options.extend(spec[0])
+    if remote_index is not None:
+        # 直接抓取的清单不受"工作流里恰好有什么 loader 节点"影响,
+        # 且不含 LoRA Stacker 的 "None" 哨兵;缺失时回退 object_info 选项。
+        # 每张卡只取自己文件夹的名字,不再把各类型清单并成一份给所有卡。
+        for item in checkpoints:
+            folders = model_folder_candidates(item.get("node_type"), item.get("field"))
+            candidates = sorted({name for folder in folders for name in remote_index.get(folder, [])})
+            if candidates:
+                item["candidates"] = candidates
+                item["candidates_baseline"] = present_model_names(remote_index, folders)
+        lora_options = remote_index.get("loras", [])
+    # 并集(整表候选)最后统一取一次:远端文件夹为空/未列出时卡片可能**没有**
+    # candidates 键(字段缺省 = 该卡没有自己的候选,前端回退并集),这里必须
+    # 用 .get —— 直接下标会 KeyError,而 worker 把任何 KeyError 映射成
+    # ERR_SOURCE_NOT_FOUND,表现为"来源载入失败 404"(实测事故)。
+    checkpoint_options = [
+        name for item in checkpoints for name in item.get("candidates", [])
+    ]
+
 
     target_file = (target_image.get("file") or {})
     from .node_graph import build_node_graph
+
+    # 输入图 loader 暴露为可编辑对象:换图即"把库内图片当作 i2i 源"的入口,
+    # 是血缘回路闭合的前置(源图在库内 → 提交前回填进 ComfyUI input/ →
+    # 生成图写入侧留下内容哈希 → 血缘边解析为 resolved)。
+    # 清单与血缘候选共用 image_lineage.image_loader_refs 的 loader 定义。
+    from .image_lineage import image_loader_refs as _image_loader_refs
+
+    image_loaders: list[dict[str, Any]] = []
+    for _ref in _image_loader_refs(prompt):
+        _nid = _ref["node_id"]
+        _wfn = workflow_nodes.get(_nid) or {}
+        image_loaders.append(
+            {
+                "node_id": _nid,
+                "label": node_display_label(_wfn, prompt.get(_nid), _ref["node_type"]),
+                "node_type": _ref["node_type"],
+                "field": _ref["raw_ref_field"],
+                "value": _ref["raw_ref"],
+            }
+        )
 
     return {
         "source_image": {
@@ -807,6 +1048,14 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
         "replay": {
             "mode": replay_mode,
             "executable": True,
+            # 来源门禁(嵌入方案 §3.1):仅当 UI 节点图存在时才可进内嵌 ComfyUI
+            # 画布。仅 API 格式可重放执行但无法进画布;A1111/NovelAI/无元数据
+            # 连执行都不可用(走到这里之前已抛错)。前端只认这个布尔,不做
+            # 元数据嗅探。
+            "embedded_supported": bool(
+                isinstance(raw_workflow, dict)
+                and (raw_workflow.get("nodes") or [])
+            ),
             "warnings": (
                 []
                 if replay_mode == "exact_api_prompt"
@@ -832,10 +1081,22 @@ def build_replay_source(doc: dict[str, Any], image_sha256: str, client: ComfyCli
             "latents": latents,
             "controlnets": list(controlnets.values()) + list(bypassed_controlnets.values()),
             "regions": list(regions.values()),
+            "mask_scopes": list(mask_scopes.values()),
+            "image_loaders": image_loaders,
         },
         "options": {
             "checkpoints": sorted(set(filter(None, checkpoint_options))),
             "loras": sorted(set(filter(None, lora_options))),
+            # 远端存在基准(供前端对候选着色,三态:列表/None=未知)。
+            # checkpoint 侧取候选文件夹的**并集**——网关兜底填充的列表只有名字、
+            # 没有来源字段,无法按 field 精确到具体文件夹;粗粒度提示已足够。
+            "remote_present": {
+                # 整表并集:仅供"卡片没带 candidates_baseline"的兜底路径
+                # (网关用归档库填充 options 时没有来源字段)。卡片级着色的基准
+                # 见 editable.checkpoints[].candidates_baseline(按各自文件夹)。
+                "checkpoints": present_model_names(remote_index, tuple(_model_folders_needed)),
+                "loras": present_model_names(remote_index, LORA_FOLDER_CANDIDATES),
+            },
         },
     }
 
@@ -1283,6 +1544,27 @@ def apply_replay_edits(
                     "control_net_name",
                     name,
                 )
+
+    for item in edits.get("image_loaders", []) or []:
+        node_id = str(item.get("node_id") or "")
+        field = str(item.get("field") or "")
+        value = item.get("value")
+        if not node_id or not field or node_id not in prompt or value in (None, ""):
+            continue
+        baseline = _editable_baseline(source, "image_loaders", node_id, field=field)
+        if not _field_changed(item, baseline, "value"):
+            continue
+        prompt[node_id].setdefault("inputs", {})[field] = value
+        workflow_node = workflow_nodes.get(node_id)
+        if workflow_node:
+            # UI workflow 侧同一引用存在 widgets_values 数组里(LoadImage 首槽为
+            # 文件名),widgets_values 结构随节点各异,故走通用 widget 写入。
+            mutate_widget_value(
+                workflow_node,
+                object_info.get(prompt[node_id].get("class_type", ""), {}),
+                field,
+                value,
+            )
 
     filename_prefix = str(edits.get("filename_prefix") or "").strip()
     if filename_prefix:

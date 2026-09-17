@@ -158,7 +158,7 @@ export default () => {
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean),
     },
-    // 图片扫描根目录由用户提供(Windows: D:\erxx;WSL/Docker: 挂载路径)。
+    // 图片扫描根目录由用户提供(Windows: D:\ComfyUI\output;WSL/Docker: 挂载路径)。
     // 为空表示未配置,启动时校验并告警,同步/解析端点降级。
     scanRoot: normalizeConfiguredPath(process.env.COMFY_SCAN_ROOT ?? ''),
     // ComfyUI 服务地址(网关主动查询 /history 的近实时通道使用)
@@ -222,7 +222,12 @@ export default () => {
     // NL 整句语义搜索已移除(性价比不足,语义查询由 tag_alias 多语言别名层兜底)。
     tagSuggest: {
       enabled: (process.env.TAG_SUGGEST_ENABLED ?? '1') !== '0',
-      assetsDir: normalizeConfiguredPath(process.env.DANBOORU_ASSETS ?? ''),
+      // 资产目录:DANBOORU_ASSETS 优先;未配置回退 <repo_root>/danbooru,
+      // 与 workflow_db/tag_suggest.py 的 _assets_dir() 默认值保持同一口径——
+      // 两侧不一致时网关会把"其实已就绪的资产"当成未配置而静默关闭能力。
+      assetsDir:
+        normalizeConfiguredPath(process.env.DANBOORU_ASSETS ?? '') ||
+        join(REPO_ROOT, 'danbooru'),
       // 空串时自动探测 <repo_root>/danbooru/danbooru.sqlite3(存在才启用)
       dbPath: normalizeConfiguredPath(process.env.DANBOORU_DB_PATH ?? ''),
     },

@@ -41,9 +41,9 @@ Danbooru 标签推荐系统为工作流检索与打标提供三条能力线（�
    - 文件：`danbooru-wiki-2024.parquet`（SHA-256: `f73a...`）
    - 用途：多语言别名提取（`tag_alias`，包含大量 CJK 中文别名）、Wiki 参考图打标（`wiki_traits`）。
 
-### 2.2 离线算法与训练流水线（`D:/gnn`）
+### 2.2 离线算法与训练流水线（`<dnndev>`）
 
-本地全套训练与处理脚本位于 `D:/gnn/scripts/`，流水线顺序如下：
+本地全套训练与处理脚本位于 `<dnndev>/scripts/`，流水线顺序如下：
 
 ```text
 [posts-snapshot.parquet]       [danbooru-wiki-2024.parquet]
@@ -58,7 +58,7 @@ Danbooru 标签推荐系统为工作流检索与打标提供三条能力线（�
      p2_embed.py ────────▶ p6_gnn.py ────────┘
                               │
                               ▼
-                     [D:/gnn/out/*.parquet]
+                     [<dnndev>/out/*.parquet]
 ```
 
 - `fetch_wiki.py`：从公网拉取/处理 wiki 语料。
@@ -67,16 +67,16 @@ Danbooru 标签推荐系统为工作流检索与打标提供三条能力线（�
 - `p6_gnn.py`：在共现图上训练 Graph Neural Network，输出 `embed_gnn.npy`。
 - `p9_semantic.py`：生成 `tag_category.parquet`（语义分类）与 `wiki_traits.parquet`（官方参考图投票）。
 
-> 以上 `p0_*` ~ `p9_*` 管线脚本仅存在于**开发者本地仓库**（D:/gnn 训练工作区），不随发布包分发；产出资产（parquet/npy）由 `utils/build_danbooru_db.py` 构建为发布用 SQLite。
+> 以上 `p0_*` ~ `p9_*` 管线脚本仅存在于**开发者本地仓库**（<dnndev> 训练工作区），不随发布包分发；产出资产（parquet/npy）由 `utils/build_danbooru_db.py` 构建为发布用 SQLite。
 
 ### 2.3 资产构建与落库脚本
 
-在具备 `D:/gnn/out` 资产目录或直接下载好中间 Parquet 文件的环境下，运行以下脚本生成发布用 SQLite 推荐库：
+在具备 `<dnndev>/out` 资产目录或直接下载好中间 Parquet 文件的环境下，运行以下脚本生成发布用 SQLite 推荐库：
 
 #### (1) 全量从 0 构建推荐数据库
 ```bash
 # 需具备 numpy, pandas, pyarrow 的 Python 环境
-python utils/build_danbooru_db.py --src D:/gnn/out --out danbooru/danbooru.sqlite3 --block 4096
+python utils/build_danbooru_db.py --src <dnndev>/out --out danbooru/danbooru.sqlite3 --block 4096
 ```
 产出：
 - `danbooru/danbooru.sqlite3`：包含 `tags`, `tag_alias`, `edges`, `tag_gnn_nn` 等核心表。
@@ -89,13 +89,13 @@ python utils/build_danbooru_db.py --src D:/gnn/out --out danbooru/danbooru.sqlit
 #### (2) 语义分类与 Wiki 权威特征增量补丁（幂等）
 ```bash
 # 为已有数据库注入 tag_category 与 wiki_traits 表，跳过耗时的 tag_gnn_nn 重算
-python utils/build_danbooru_db.py --patch-semantic --src D:/gnn/out
+python utils/build_danbooru_db.py --patch-semantic --src <dnndev>/out
 ```
 
 #### (3) 角色索引扩充补丁（扩充至 43 万 Tag）
 ```bash
 # 将 2025-2026 最新出现的角色/作品全量打入 tags 表（ID 112283+），补齐 name_pc 与 wiki 别名
-python utils/build_danbooru_db.py --patch-characters --snapshot D:/gnn/posts-snapshot.parquet
+python utils/build_danbooru_db.py --patch-characters --snapshot <dnndev>/posts-snapshot.parquet
 ```
 
 #### (4) 重建别名与中英文权重索引
@@ -180,8 +180,8 @@ node dist/main.js # 启动片刻完成 DDL 建表后可 Ctrl+C
 # 步骤 3: 注入测试种子数据 (保证基础界面可测; 种子工具仅开发者本地仓库存在,此处从略)
 cd ..
 
-# 步骤 4: 构建推荐数据库 (需挂载或下载 D:/gnn/out 资产)
-python utils/build_danbooru_db.py --src D:/gnn/out --out danbooru/danbooru.sqlite3
+# 步骤 4: 构建推荐数据库 (需挂载或下载 <dnndev>/out 资产)
+python utils/build_danbooru_db.py --src <dnndev>/out --out danbooru/danbooru.sqlite3
 
 # 步骤 5: 存量批次推荐计算回填 (工具仅开发者本地仓库存在,此处从略; 运行期由网关自动补齐)
 

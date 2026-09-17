@@ -26,7 +26,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { Model } from 'mongoose';
 import type Database from 'better-sqlite3';
 import { tmpdir } from 'os';
-import { basename, extname, join } from 'path';
+import { basename, dirname, extname, join } from 'path';
 import { Images, ImagesDocument } from '../../schemas';
 import { ParseWorkerService } from '../../workers/parse-worker.service';
 import { SQLITE_DB } from '../../sqlite/sqlite.module';
@@ -40,6 +40,7 @@ import {
   WorkerUnavailableError,
 } from '../../workers/parse-worker';
 import { ThumbCache } from './thumb-cache';
+import { ThumbDiskCache } from './thumb-disk-cache';
 import { isEnginePending } from '../../lib/engine';
 import { RequireAuth } from '../../common/auth';
 import { instanceStamp } from '../../lib/instance';
@@ -104,8 +105,10 @@ interface UploadedFileLike {
  *     → 前端 Detail 结构(source_mode=transient)。
  *   parse-comfy-image:入参白名单校验 → fetchComfyViewImage(带超时/类型校验)
  *     → 同一 parseTempImagePayload 链路。
- *   thumb:ThumbCache 命中 → 直接回;未命中 → findResolvedPath(SQLite/Mongo/
- *     内存视图,失败走纯远程透传)→ worker.makeThumb 渲染 → 写缓存 → sendWebp。
+ *   thumb:ThumbCache(内存)命中 → 直接回;未命中 → ThumbDiskCache(磁盘,
+ *     跨重启保留)命中 → 回填内存并回;仍未命中 → findResolvedPath
+ *     (SQLite/Mongo/内存视图,失败走纯远程透传)→ worker.makeThumb 渲染
+ *     → 写两层缓存 → sendWebp(带 ETag,If-None-Match 命中回 304)。
  *
  * 前端消费对应:解析结果复用前端 Detail 详情渲染;缩略图以
  * <img src="/api/thumb/<sha256>?w=360&h=360"> 形式在卡片/详情页使用,
@@ -121,6 +124,8 @@ export class ParseController {
   // 缩略图内存缓存:键 sha256+w+h → WebP 字节,LRU 上限 500 条
   // (协议 §10:缓存归网关持有,worker 每次渲染新字节,见 thumb-cache.ts)
   private readonly thumbCache = new ThumbCache();
+  // 缩略图磁盘缓存:跨进程重启保留(内存缓存之上的第二层,见 thumb-disk-cache.ts)
+  private readonly thumbDiskCache: ThumbDiskCache;
   // SQLite 只读模式:路径/元数据查询走 better-sqlite3,不依赖 Mongo
   private readonly readMode: boolean;
 
@@ -133,6 +138,11 @@ export class ParseController {
     private readonly imagesModel: Model<ImagesDocument>,
   ) {
     this.readMode = this.config.get<boolean>('sqlite.readMode') ?? false;
+    // 缓存目录 = 主库同级的 thumbnails/(内存库与纯远程模式停用)
+    const dbPath = this.config.get<string>('sqlite.dbPath') ?? '';
+    this.thumbDiskCache = new ThumbDiskCache(
+      dbPath && dbPath !== ':memory:' ? join(dirname(dbPath), 'thumbnails') : '',
+    );
   }
 
   // ----------------------------------------------------------- /api/parse-image
@@ -530,9 +540,10 @@ export class ParseController {
    *
    * 路径参数:sha256;查询参数:w / h(默认 360,区间 [64,1024],
    * 非整数/越界抛 422)。
-   * 链路:ThumbCache 命中直接回 → findResolvedPath 定位文件(存储层 +
-   * 内存视图兜底,失败则纯远程透传)→ 文件存在性校验 →
-   * worker.makeThumb 渲染 → 写缓存 → sendWebp(带 1 天 Cache-Control)。
+   * 链路:ThumbCache(内存)命中直接回 → ThumbDiskCache(磁盘)命中回填内存
+   * 后回 → findResolvedPath 定位文件(存储层 + 内存视图兜底,失败则纯远程
+   * 透传)→ 文件存在性校验 → worker.makeThumb 渲染 → 写两层缓存 →
+   * sendWebp(带 1 天 Cache-Control + 弱 ETag,If-None-Match 命中回 304)。
    * 异常:纯远程待配库 / 未定位文件 / 透传失败 → 404;源文件缺失 → 404;
    * worker 错误经 mapWorkerError 映射(503/504/404/422/500)。
    */
@@ -556,7 +567,14 @@ export class ParseController {
     // 缓存命中直接回字节,跳过 worker 渲染(内容 sha256 寻址,无需 TTL)
     const cached = this.thumbCache.get(sha256, w, h);
     if (cached) {
-      this.sendWebp(res, cached);
+      this.sendWebp(res, cached, sha256, w, h, req);
+      return;
+    }
+    // 磁盘缓存(跨进程重启保留):命中则回填内存缓存并直接下发
+    const onDisk = this.thumbDiskCache.read(sha256, w, h);
+    if (onDisk) {
+      this.thumbCache.set(sha256, w, h, onDisk);
+      this.sendWebp(res, onDisk, sha256, w, h, req);
       return;
     }
 
@@ -603,9 +621,10 @@ export class ParseController {
       throw this.mapWorkerError(err);
     }
 
-    // 渲染成功后写缓存,再统一走 sendWebp 下发(缓存键 sha256+w+h)
+    // 渲染成功后写缓存(内存 + 磁盘),再统一走 sendWebp 下发
     this.thumbCache.set(sha256, w, h, thumb.data);
-    this.sendWebp(res, thumb.data);
+    this.thumbDiskCache.write(sha256, w, h, thumb.data);
+    this.sendWebp(res, thumb.data, sha256, w, h, req);
   }
 
   /**
@@ -747,13 +766,33 @@ export class ParseController {
    * sha256 决定不可变,浏览器可放心缓存 1 天)、显式 Content-Length
    * (避免 chunked,便于浏览器/代理流式处理)。
    */
-  private sendWebp(res: Response, data: Buffer): void {
+  private sendWebp(
+    res: Response,
+    data: Buffer,
+    sha256: string,
+    w: number,
+    h: number,
+    req?: Request,
+  ): void {
+    // 内容寻址 → 同一 (sha256, w, h) 的渲染产物不变,弱 ETag 足以表达
+    // "表示未变";命中 If-None-Match 时回 304,省掉整张缩略图传输。
+    const etag = `W/"${sha256}-${w}x${h}"`;
+    const ifNoneMatch = String(req?.headers['if-none-match'] ?? '');
+    if (
+      ifNoneMatch &&
+      (ifNoneMatch === '*' ||
+        ifNoneMatch.split(',').some((tag) => tag.trim() === etag))
+    ) {
+      res.status(HttpStatus.NOT_MODIFIED).end();
+      return;
+    }
     res
       .status(HttpStatus.OK)
       .set({
         'Content-Type': 'image/webp',
         'Cache-Control': 'public, max-age=86400',
         'Content-Length': String(data.length),
+        ETag: etag,
       })
       .end(data);
   }

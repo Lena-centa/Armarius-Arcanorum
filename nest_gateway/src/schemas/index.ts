@@ -40,3 +40,5 @@ export {
   FavoriteCategoriesSchema,
 } from './favorite-categories.schema';
 export type { FavoriteCategoriesDocument } from './favorite-categories.schema';
+export { ImageLineage, ImageLineageSchema } from './image-lineage.schema';
+export type { ImageLineageDocument } from './image-lineage.schema';

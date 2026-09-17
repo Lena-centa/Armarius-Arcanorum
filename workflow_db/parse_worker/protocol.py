@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path as _Path
@@ -71,14 +72,42 @@ class _RecordEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+def _sanitize_non_finite(value: Any) -> Any:
+    """把非有限浮点(NaN / ±Infinity)替换为 None。
+
+    来源:ComfyUI 存档的 raw_prompt 里 ``is_changed`` 之类的字段带 NaN,
+    Python 的 json.loads 接受该 token、json.dumps 默认又原样写成裸 ``NaN``,
+    而 JS 的 JSON.parse 直接拒绝 —— 整条 RPC 响应会被网关判为"坏行"丢弃,
+    表现为请求挂到超时、worker 被重启(实测 /api/generate/source 504)。
+    JS 侧 JSON.stringify(NaN) 产出 null,两侧统一为 null 才是可互操作的标准 JSON。
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _sanitize_non_finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_non_finite(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_sanitize_non_finite(item) for item in sorted(value)]
+    return value
+
+
 def _dumps(payload: dict[str, Any]) -> str:
-    """Serialize a message to a single JSON line."""
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        cls=_RecordEncoder,
-    )
+    """Serialize a message to a single JSON line(标准 JSON,不含裸 NaN/Infinity)。
+
+    读方是 JS 的 JSON.parse,因此 ``allow_nan=False`` 是硬约束:
+    常见路径(无 NaN)只序列化一次;命中 ValueError 才净化重试一次,
+    避免为罕见 NaN 给每条响应都加一次全量遍历。
+    """
+    encoder = {
+        "ensure_ascii": False,
+        "separators": (",", ":"),
+        "cls": _RecordEncoder,
+    }
+    try:
+        return json.dumps(payload, allow_nan=False, **encoder)
+    except ValueError:
+        return json.dumps(_sanitize_non_finite(payload), allow_nan=False, **encoder)
 
 
 # ---------------------------------------------------------------------------

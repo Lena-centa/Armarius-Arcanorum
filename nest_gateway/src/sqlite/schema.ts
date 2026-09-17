@@ -1,7 +1,7 @@
 /**
  * SQLite 灰测轨道 — DDL。
  *
- * 与 docs/archive/NEST_GATEWAY_MIGRATION_PLAN.md 的 Nest 迁移不同,这里不做引擎切换,
+ * 与 Nest 网关迁移时的取舍不同,这里不做引擎切换,
  * 而是"双端并行 + 灰测观察":Mongo 仍是唯一生产数据源,SQLite 只作为镜像。
  *
  * 设计原则(详见 SQLite 可行性研究报告):
@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS batches (
   batch_count     INTEGER,
   base_model      TEXT,
   has_positive    INTEGER,             -- prompts.positive 存在且非空
+  sampler_steps   INTEGER,             -- samplers[0].steps 物化(统计聚合免 JSON1 全表扫)
+  sampler_cfg     REAL,                -- samplers[0].cfg 物化
   search_text     TEXT,
   doc_json        TEXT NOT NULL
 );
@@ -143,7 +145,8 @@ CREATE TABLE IF NOT EXISTS batch_images (
   source_path    TEXT,
   filename       TEXT,
   image_name     TEXT,
-  sha256         TEXT,
+  sha256         TEXT,                -- 路径字符串哈希(逻辑键),非内容哈希
+  content_sha256 TEXT,                -- 文件内容哈希(血缘匹配用;惰性回填)
   mtime_ns       INTEGER,
   size_bytes     INTEGER,
   captured_at    TEXT,
@@ -151,6 +154,10 @@ CREATE TABLE IF NOT EXISTS batch_images (
   PRIMARY KEY (batch_key, resolved_path)
 );
 CREATE INDEX IF NOT EXISTS idx_batch_images_sha256 ON batch_images(sha256);
+-- content_sha256 的索引不在此处声明:该列对旧库由迁移 v5 补(见 db.ts SCHEMA_MIGRATIONS),
+-- 而基线在迁移**之前**执行 —— 表已存在但列未补齐的旧库上,这条 CREATE INDEX 会抛
+-- "no such column: content_sha256"(实测 user_version<=4 的旧库直接打不开,升级即起不来)。
+-- 索引与列同属迁移 v5,基线只保留"新库自带的列定义"。
 CREATE INDEX IF NOT EXISTS idx_batch_images_mtime_ns ON batch_images(mtime_ns);
 CREATE INDEX IF NOT EXISTS idx_batch_images_filename ON batch_images(filename);
 CREATE INDEX IF NOT EXISTS idx_batch_images_image_name ON batch_images(image_name);
@@ -312,6 +319,30 @@ CREATE TABLE IF NOT EXISTS batch_tag_suggestions (
   updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS image_lineage_edges (
+  edge_id               TEXT PRIMARY KEY,
+  child_sha256          TEXT NOT NULL,
+  child_batch_key       TEXT,
+  parent_sha256         TEXT,
+  parent_batch_key      TEXT,
+  relation_type         TEXT NOT NULL,
+  origin                TEXT NOT NULL,
+  status                TEXT NOT NULL,
+  raw_ref               TEXT,
+  source_node_id        TEXT,
+  source_node_type      TEXT,
+  source_content_sha256 TEXT,
+  match_method          TEXT,
+  downstream            TEXT,
+  active                INTEGER NOT NULL DEFAULT 1,
+  created_at            TEXT,
+  updated_at            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lineage_child ON image_lineage_edges(child_sha256);
+CREATE INDEX IF NOT EXISTS idx_lineage_parent ON image_lineage_edges(parent_sha256);
+CREATE INDEX IF NOT EXISTS idx_lineage_status ON image_lineage_edges(status);
+CREATE INDEX IF NOT EXISTS idx_lineage_content_hash ON image_lineage_edges(source_content_sha256);
+
 -- ---------------------------------------------------------------------------
 -- FTS5 独立镜像(灰测信息对照,不改写查询)
 -- ---------------------------------------------------------------------------
@@ -355,6 +386,7 @@ DELETE FROM manual_label_categories;
 DELETE FROM favorites;
 DELETE FROM favorite_categories;
 DELETE FROM batch_tag_suggestions;
+DELETE FROM image_lineage_edges;
 DELETE FROM fts_batches;
 DELETE FROM fts_stats_docs;
 DELETE FROM fts_recipe_groups;

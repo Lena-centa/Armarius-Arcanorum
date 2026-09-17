@@ -2,7 +2,7 @@
 # 版本号生成器:开发分支输出内部版本号,release/* 分支输出公开版本号。
 #
 #   内部号: <base>-YYYYMMDD-<branch-slug>-HHMMSS
-#           例 0.1.0-20260907-feature-nest-gateway-143052
+#           例 0.1.0-20260907-my-feature-143052
 #           (slug 归一:/ _ . 一律转 -,保证是合法 semver prerelease 段;
 #            下划线不被 semver 允许)
 #   公开号: package.json 的 version 原样(如 0.1.0-beta.1)

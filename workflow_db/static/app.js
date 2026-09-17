@@ -4,6 +4,9 @@ const state = {
   previewItem: null,
   previewIndex: 0,
   previewDerived: null,
+  previewLineage: null,
+  previewCompareSha: null,
+  previewCompareMask: false,
   previewView: "image",
   page: 1,
   pageSize: 50,
@@ -1643,7 +1646,9 @@ function bindQuickAnnotateInteractions() {
 // UI 约定(与用户确认):收藏在图片库主界面只出现在 filters--compact 的
 // 「只看收藏 + 收藏分类 combo」筛选里,不占其它 UI 空间(无面板切换按钮/
 // 预览头按钮/列表行星标);单图收藏入口:
-//   - 预览弹窗「文件名」旁 checkbox:勾选 = 收藏到未分类,取消 = 从全部分类移除
+//   - 预览弹窗头部「★ 收藏」按钮 + 备注输入(2026-09-12 新增):收藏 = 未分类
+//     收藏行;备注与该行同存(写备注即先收藏到未分类)。左侧竖列缩略图旁的
+//     checkbox 是「待处理」勾选(state.selection),不是收藏,勿混淆。
 //   - danbooru 弹窗内「快速标注」旁收藏条:展开多分类 checkbox 组 + 备注,
 //     保存时 diff 现有分类 vs 新选择(逐分类 upsert / DELETE?category=x)
 // 收藏状态索引 state.favorites(Set) + state.favoriteMeta(Map,含 categories
@@ -1744,6 +1749,36 @@ function syncFavoriteStars() {
     btn.title = on ? "取消收藏" : "收藏这张图";
   });
   syncFavBars();
+  syncPreviewFavControls();
+}
+
+/**
+ * 预览弹层头部的收藏/备注控件(按当前图同步)。
+ * 收藏语义 = 未分类收藏行;备注写在同一条行上(见 favorites 控制器),
+ * 所以备注输入在保存时会顺带把图收藏到未分类——title 与 placeholder 都写明。
+ */
+function syncPreviewFavControls() {
+  const btn = document.getElementById("previewFavBtn");
+  const note = document.getElementById("previewFavNote");
+  if (!btn || !note) {
+    return;
+  }
+  const image = (state.previewItem?.images || [])[state.previewIndex || 0] || {};
+  const sha = String(image.sha256 || "");
+  btn.hidden = !sha;
+  note.hidden = !sha;
+  if (!sha) {
+    return;
+  }
+  btn.dataset.previewFavSha = sha;
+  note.dataset.previewFavSha = sha;
+  const on = state.favorites.has(sha);
+  btn.classList.toggle("is-on", on);
+  btn.setAttribute("aria-pressed", String(on));
+  btn.textContent = on ? "★ 已收藏" : "★ 收藏";
+  btn.title = on ? "取消收藏(含全部分类)" : "收藏当前图(未分类)";
+  const meta = state.favoriteMeta.get(sha) || {};
+  note.value = meta.note ? String(meta.note) : "";
 }
 
 // 弹窗 danbooru 面板内的单图收藏条:按面板关联图片同步 已收藏/收藏
@@ -2395,9 +2430,9 @@ function samplerHtml(samplers) {
       (sampler, index) => `
         <div class="meta-block">
           <span class="meta-label">Sampler ${index + 1}</span>
-          <div>steps ${escapeHtml(linkValueText(sampler.steps))} / cfg ${escapeHtml(linkValueText(sampler.cfg))}</div>
+          <div>steps ${escapeHtml(linkValueText(sampler.steps))} / cfg ${escapeHtml(formatMetric(linkValueText(sampler.cfg)))}</div>
           <div>${escapeHtml(linkValueText(sampler.sampler_name))} / ${escapeHtml(linkValueText(sampler.scheduler))}</div>
-          <div>denoise ${escapeHtml(linkValueText(sampler.denoise))}</div>
+          <div>denoise ${escapeHtml(formatMetric(linkValueText(sampler.denoise)))}</div>
         </div>`
     )
     .join("");
@@ -2882,7 +2917,27 @@ function renderResults(payload) {
   const end = total ? start + items.length - 1 : 0;
   document.getElementById("resultCount").textContent = `第 ${page} 页 · ${start}-${end} / ${total} 条`;
   if (!items.length) {
-    container.innerHTML = '<div class="empty">当前筛选下没有记录。</div>';
+    // 空结果给一条可操作的出路:关键词搜索只覆盖 prompt 文本,按文件名/路径
+    // 找图要用筛选区的「文件名」字段——直接把首个关键词搬过去重查,避免
+    // 用户以为"图不在库里"(实测踩点)。
+    const keyword = (new URLSearchParams(location.search).get("q") || "").trim();
+    const firstToken = keyword.split(/[\s,，]+/).filter(Boolean)[0] || "";
+    const hintHtml =
+      firstToken && !new URLSearchParams(location.search).get("filename")
+        ? `<div class="empty-hint">关键词搜索只匹配 prompt 文本。
+             <button type="button" class="ghost-btn" id="searchAsFilenameBtn">按文件名搜索「${escapeHtml(firstToken)}」</button>
+           </div>`
+        : "";
+    container.innerHTML = `<div class="empty">当前筛选下没有记录。</div>${hintHtml}`;
+    const asFilenameBtn = document.getElementById("searchAsFilenameBtn");
+    if (asFilenameBtn) {
+      asFilenameBtn.addEventListener("click", () => {
+        document.getElementById("filenameInput").value = firstToken;
+        const searchInput = document.getElementById("searchInput");
+        searchInput.value = "";
+        refreshList();
+      });
+    }
     state.currentItems = new Map();
     cacheSelectionFromList();
     syncBulkUi();
@@ -2967,6 +3022,7 @@ function renderResults(payload) {
                     >
                       ${thumbUrl ? `<img src="${thumbUrl}" alt="${escapeHtml(displayFilename)}" loading="lazy" />` : '<span class="muted">无预览</span>'}
                     </button>
+                    <span class="lineage-mark" data-lineage-sha="${escapeHtml(itemFile.sha256 || "")}"></span>
                   </div>
                   ${detailPending ? "" : tagMatchesHtml(prompts)}
                 </td>
@@ -2974,7 +3030,7 @@ function renderResults(payload) {
                   <div class="meta-stack">
                     <div class="meta-block">
                       <span class="meta-label">Model</span>
-                      <div>${item.model.base_model || "-"}</div>
+                      <div>${escapeHtml(item.model?.base_model) || "-"}</div>
                     </div>
                     <div class="meta-block">
                       <span class="meta-label">LoRA</span>
@@ -3011,6 +3067,53 @@ function renderResults(payload) {
   balancePromptHeights();
   setupPromptHeightObserver();
   void loadDerivedSummaries(items);
+  void loadLineageMarks(items);
+}
+
+/**
+ * 列表卡片血缘角标:页内批量调 /api/image/lineage/marks,失败静默(不阻塞列表)。
+ * 只标 i2i(图生图):
+ *   是图生图产物 —— 实心强调(tooltip 再分"已关联父图 N"/"源图未入库");
+ *   仅被当作图生图源 —— 描边弱化。
+ * 实测存档里 i2i 边全部未解析到父图,所以措辞不写死"父图";无边或接口
+ * 不可用时保持空元素(styles.css 里 :empty 不占位)。
+ */
+async function loadLineageMarks(items) {
+  const shas = [];
+  for (const item of items) {
+    const batchImages = (item.batch?.images) || [];
+    const sha = batchImages[0]?.file?.sha256 || item.file?.sha256 || "";
+    if (sha && !shas.includes(sha)) shas.push(sha);
+  }
+  if (!shas.length) return;
+  let marks = {};
+  try {
+    const payload = await fetchJson("/api/image/lineage/marks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shas }),
+    });
+    marks = payload?.marks || {};
+  } catch {
+    return; // 失败静默:无角标不影响列表渲染
+  }
+  document.querySelectorAll("[data-lineage-sha]").forEach((container) => {
+    const mark = marks[container.dataset.lineageSha];
+    if (!mark) return;
+    const product = Number(mark.as_product || 0);
+    const linked = Number(mark.as_product_linked || 0);
+    const source = Number(mark.as_source || 0);
+    if (!product && !source) return;
+    container.title = product
+      ? `图生图产物${linked ? ` · 已关联父图 ${linked}` : " · 源图未入库"}`
+      : `被用作图生图源(子图 ${source})`;
+    container.classList.toggle("is-product", product > 0);
+    container.innerHTML =
+      '<svg viewBox="0 0 24 12" width="24" height="12" role="img" aria-label="i2i">' +
+      '<rect x="0.5" y="0.5" width="23" height="11" rx="3.5"></rect>' +
+      '<text x="12" y="8.4" text-anchor="middle">i2i</text>' +
+      "</svg>";
+  });
 }
 
 /**
@@ -3284,7 +3387,7 @@ function samplerStageLabel(sampler, index) {
   if (denoise !== undefined && denoise !== null && denoise !== "") {
     const value = Number(linkValueText(denoise));
     if (Number.isFinite(value)) {
-      label += value >= 0.999 ? ` · 主采样 (denoise ${value})` : ` · 后处理 (denoise ${value})`;
+      label += value >= 0.999 ? ` · 主采样 (denoise ${formatMetric(value)})` : ` · 后处理 (denoise ${formatMetric(value)})`;
     }
   } else if (index === 0) {
     label += " · 主采样";
@@ -3423,10 +3526,12 @@ function renderPreviewDetails() {
       ${novelaiRawJsonBlock("NovelAI 原始元数据", rawNovelai)}
     </section>`
     : "";
+  const lineageHtml = renderLineageSection(file.sha256);
 
   container.innerHTML = `
     ${enrichmentHtml}
     ${novelaiHtml}
+    ${lineageHtml}
     <section class="detail-section">
       <h3>文件</h3>
       ${previewDetailRow("文件名", escapeHtml(file.filename || "-"))}
@@ -3475,9 +3580,9 @@ function renderPreviewDetails() {
               ? previewDetailRow("Noise Seed", `<span class="detail-mono">${escapeHtml(linkValueText(sampler.noise_seed))}</span>`)
               : ""
           }
-          ${previewDetailRow("Steps / CFG", `${escapeHtml(linkValueText(sampler.steps))} / ${escapeHtml(linkValueText(sampler.cfg))}`)}
+          ${previewDetailRow("Steps / CFG", `${escapeHtml(linkValueText(sampler.steps))} / ${escapeHtml(formatMetric(linkValueText(sampler.cfg)))}`)}
           ${previewDetailRow("采样器", `${escapeHtml(linkValueText(sampler.sampler_name))} / ${escapeHtml(linkValueText(sampler.scheduler))}`)}
-          ${previewDetailRow("Denoise", escapeHtml(linkValueText(sampler.denoise)))}
+          ${previewDetailRow("Denoise", escapeHtml(formatMetric(linkValueText(sampler.denoise))))}
         </div>`
               )
               .join("")
@@ -3502,6 +3607,91 @@ function renderPreviewDetails() {
     </section>
   `;
   void loadTagSuggestions(item.batch?.key || item.batch_key || "");
+}
+
+function lineageRelationLabel(type) {
+  return { i2i: "图生图", controlnet: "ControlNet", mask: "蒙版", reference: "参考图", auxiliary: "其他" }[type] || type || "其他";
+}
+
+// 多 CN 参考归属:该参考图喂到的 ControlNet 应用(模型名/强度)。
+// 后端只在 controlnet 关系上带 downstream(image_lineage → lineage.service),
+// 一行内有多个 apply 时按顺序并列。
+function lineageDownstreamLabel(edge) {
+  const list = Array.isArray(edge?.downstream) ? edge.downstream : [];
+  return list
+    .map((item) => {
+      const name = item?.control_net_name || item?.apply_type || "ControlNet";
+      const strength = item?.strength == null ? "" : ` · 强度 ${item.strength}`;
+      return `${name}${strength}`;
+    })
+    .join("、");
+}
+
+function renderLineageSection(activeSha) {
+  if (!activeSha) return "";
+  const payload = state.previewLineage;
+  if (!payload || payload.root?.sha256 !== activeSha) {
+    return '<section class="detail-section detail-lineage"><h3>继承关系</h3><div class="muted">加载中…</div></section>';
+  }
+  const nodes = new Map((payload.nodes || []).map((node) => [node.sha256, node]));
+  const edges = payload.edges || [];
+  const parents = edges.filter((edge) => edge.child_sha256 === activeSha && edge.parent_sha256);
+  const children = edges.filter((edge) => edge.parent_sha256 === activeSha);
+  const unresolved = edges.filter((edge) => edge.child_sha256 === activeSha && edge.status !== "resolved");
+  const rows = (items, direction) => items.map((edge) => {
+    const sha = direction === "parent" ? edge.parent_sha256 : edge.child_sha256;
+    const node = nodes.get(sha) || { sha256: sha };
+    const downstream = lineageDownstreamLabel(edge);
+    return `<div class="lineage-row">
+      <button type="button" class="lineage-thumb" data-lineage-open="${escapeHtml(sha)}" title="打开图片"><img src="${apiUrl(`/api/thumb/${encodeURIComponent(sha)}?w=96&h=96`)}" alt="" /></button>
+      <div class="lineage-row-main"><strong>${escapeHtml(node.filename || sha.slice(0, 12))}</strong><span>${escapeHtml(lineageRelationLabel(edge.relation_type))}${edge.origin === "manual" ? " · 人工" : ""}</span>${downstream ? `<span class="lineage-downstream" title="该图喂到的 ControlNet">→ ${escapeHtml(downstream)}</span>` : ""}</div>
+      ${direction === "parent" ? `<button type="button" class="ghost-btn lineage-compare-btn" data-lineage-compare="${escapeHtml(sha)}">对比</button>` : ""}
+    </div>`;
+  }).join("");
+  return `<section class="detail-section detail-lineage">
+    <h3>继承关系</h3>
+    ${parents.length ? `<div class="lineage-group-label">父图</div>${rows(parents, "parent")}` : '<div class="muted">没有已匹配父图</div>'}
+    ${children.length ? `<div class="lineage-group-label">直接子图</div>${rows(children, "child")}` : ""}
+    ${unresolved.length ? `<div class="lineage-unresolved">${unresolved.map((edge) => `${escapeHtml(lineageRelationLabel(edge.relation_type))}: ${escapeHtml(edge.raw_ref || "源图不可恢复")} (${escapeHtml(edge.status)})`).join("<br>")}</div>` : ""}
+    <div class="lineage-manual">
+      <select data-lineage-relation aria-label="关系类型">${["i2i", "controlnet", "mask", "reference", "auxiliary"].map((type) => `<option value="${type}">${lineageRelationLabel(type)}</option>`).join("")}</select>
+      <input type="search" data-lineage-query placeholder="搜索父图文件名或 SHA" />
+      <button type="button" class="ghost-btn" data-lineage-search>搜索</button>
+      <button type="button" class="ghost-btn" data-lineage-clear>恢复自动</button>
+      <div class="lineage-search-results"></div>
+    </div>
+  </section>`;
+}
+
+async function loadPreviewLineage(sha256) {
+  try {
+    const payload = await fetchJson(`/api/image/${encodeURIComponent(sha256)}/lineage?direction=both&depth=1`);
+    const active = state.previewItem?.images?.[state.previewIndex];
+    if (!active || active.sha256 !== sha256) return;
+    state.previewLineage = payload;
+    renderPreviewDetails();
+    // lineage 到达后,若用户已进入对比视图且处于遮罩态,重渲染以启用/更新遮罩底图
+    if (state.previewView === "compare") {
+      renderPreviewStage();
+    }
+  } catch {
+    state.previewLineage = { root: { sha256 }, nodes: [], edges: [] };
+    renderPreviewDetails();
+    if (state.previewView === "compare") {
+      renderPreviewStage();
+    }
+  }
+}
+
+async function openLineageImage(sha256) {
+  const node = (state.previewLineage?.nodes || []).find((item) => item.sha256 === sha256);
+  if (!node?.batch_key) return;
+  const payload = await fetchImageDetails([node.batch_key]);
+  const item = payload.items?.[0];
+  if (!item) return;
+  const images = item.batch?.images || [];
+  const index = Math.max(0, images.findIndex((image) => image.sha256 === sha256));
+  openPreview({ images, item }, index);
 }
 
 function getActiveWorkflowData() {
@@ -3560,6 +3750,7 @@ function syncPreviewView() {
     return;
   }
   document.getElementById("imagePreviewTitle").textContent = activeImage.filename || "图片预览";
+  syncPreviewFavControls();
 
   const previewItem = state.previewItem;
   const item = previewItem.item;
@@ -3618,6 +3809,10 @@ function syncPreviewView() {
     : [];
   const activeMeta = (previewFullImages[state.previewIndex] || {}).metadata || activeImage.metadata || {};
   const isNovelai = Boolean(activeMeta.raw_novelai);
+  // 生成入口门禁(嵌入方案 §3.1「顺带修既有缺口」):正向要求 ComfyUI 来源
+  // ——raw_prompt 或 raw_workflow 至少其一存在。A1111(raw_parameters)与
+  // 无元数据的图没有可执行工作流,此前放行到 submit 才运行期报错,这里前置拦下
+  const isComfyuiSource = Boolean(activeMeta.raw_prompt || activeMeta.raw_workflow);
   const imageUrl = activeImage.object_url ||
     (activeImage.sha256 ? apiUrl(`/api/image/${activeImage.sha256}`) : "");
   if (imageUrl) {
@@ -3629,7 +3824,7 @@ function syncPreviewView() {
   body.classList.remove("is-zoomed");
   const generateLink = document.getElementById("previewGenerateLink");
   if (generateLink) {
-    generateLink.hidden = isTransient || isNovelai || !activeImage.sha256;
+    generateLink.hidden = isTransient || isNovelai || !isComfyuiSource || !activeImage.sha256;
     generateLink.href = activeImage.sha256
       ? `/generate?sha256=${encodeURIComponent(activeImage.sha256)}`
       : "/generate";
@@ -3649,6 +3844,9 @@ function syncPreviewView() {
     exportWfBtn.hidden = !wfData || isNovelai;
   }
   renderPreviewStrip(images, state.previewIndex);
+  state.previewLineage = null;
+  state.previewCompareSha = null;
+  state.previewCompareMask = false;
   renderPreviewDetails();
   document.getElementById("previewPrevBtn").disabled = state.previewIndex <= 0;
   document.getElementById("previewNextBtn").disabled = state.previewIndex >= images.length - 1;
@@ -3660,15 +3858,25 @@ function syncPreviewView() {
   const graphBtn = document.getElementById("previewNodeGraphBtn");
   if (graphBtn) graphBtn.hidden = true;
   renderPreviewStage();
-  if (!isTransient && activeImage.sha256) {
+  if (!isTransient && isComfyuiSource && activeImage.sha256) {
     void loadPreviewDerived(activeImage.sha256);
+  }
+  if (!isTransient && activeImage.sha256 && typeof loadPreviewLineage === "function") {
+    void loadPreviewLineage(activeImage.sha256);
   }
   syncFavoriteStars();
 }
 
-/** 加载详情页派生层摘要(/derived/:sha256),失败静默。 */
+/** 加载详情页派生层摘要(/derived/:sha256),失败静默。仅对含 ComfyUI 流程的记录请求。 */
 async function loadPreviewDerived(sha256) {
   if (state.previewItem?.transient) return;
+  const previewFullImages = Array.isArray(state.previewItem?.item?.images)
+    ? state.previewItem.item.images
+    : [];
+  const activeImage = (state.previewItem?.images || [])[state.previewIndex] || {};
+  const activeMeta = (previewFullImages[state.previewIndex] || {}).metadata || activeImage.metadata || {};
+  const isComfyui = Boolean(activeMeta.raw_prompt || activeMeta.raw_workflow);
+  if (!isComfyui) return;
   try {
     const payload = await fetchJson(`/api/generate/derived/${encodeURIComponent(sha256)}`);
     if (!payload || typeof payload !== "object") return;
@@ -3678,6 +3886,10 @@ async function loadPreviewDerived(sha256) {
     const graphBtn = document.getElementById("previewNodeGraphBtn");
     if (graphBtn) {
       graphBtn.hidden = !(payload.node_graph?.nodes?.length);
+    }
+    // 若已在对比视图(遮罩按钮可能因数据未到而禁用),派生层到达后重渲染
+    if (state.previewView === "compare") {
+      renderPreviewStage();
     }
     // 若已处于节点图视图,数据到达后重渲染
     if (state.previewView === "graph") {
@@ -3699,6 +3911,39 @@ function renderPreviewStage() {
     stage.id = "previewNodeGraphStage";
     body.appendChild(stage);
   }
+  if (state.previewView === "compare" && state.previewCompareSha) {
+    image.style.display = "none";
+    stage.style.display = "block";
+    const active = state.previewItem?.images?.[state.previewIndex];
+    const childUrl = active?.sha256 ? apiUrl(`/api/image/${active.sha256}`) : "";
+    const parentUrl = apiUrl(`/api/image/${state.previewCompareSha}`);
+    // 遮罩范围:优先用派生层 mask_scopes(按参数绘制),缺线则回退 lineage mask 边源图
+    const maskScopes = state.previewDerived?.mask_scopes || [];
+    const lineageMaskEdge = (state.previewLineage?.edges || []).find(
+      (edge) => edge.child_sha256 === active?.sha256 && edge.relation_type === "mask" && edge.parent_sha256,
+    );
+    const lineageMaskSha = lineageMaskEdge?.parent_sha256 || null;
+    const hasScope = maskScopes.length > 0;
+    const useMask = state.previewCompareMask && (hasScope || lineageMaskSha);
+    const baseSha = state.previewCompareSha;
+    const baseUrl = apiUrl(`/api/image/${baseSha}`);
+    const maskOverlay = useMask
+      ? renderMaskScopeOverlay(maskScopes.length ? maskScopes : null, lineageMaskSha)
+      : "";
+    stage.innerHTML = `<div class="lineage-compare-stage">
+      <img class="lineage-compare-base" src="${baseUrl}" alt="父图" />
+      <div class="lineage-compare-overlay" style="width:50%"><img src="${childUrl}" alt="子图" /></div>
+      ${maskOverlay}
+      <input class="lineage-compare-slider" type="range" min="0" max="100" value="50" aria-label="父子图分割位置" />
+      <div class="lineage-compare-mask-switch" role="group" aria-label="对比底图">
+        <button type="button" class="ghost-btn${!useMask ? " is-active" : ""}" data-lineage-compare-mode="image">原图</button>
+        <button type="button" class="ghost-btn${useMask ? " is-active" : ""}" data-lineage-compare-mode="mask" ${hasScope || lineageMaskSha ? "" : "disabled"}>遮罩${!hasScope && !lineageMaskSha ? " (无)" : ""}</button>
+      </div>
+      <span class="lineage-compare-caption">${useMask ? (hasScope ? "遮罩范围 (参数)" : `遮罩源:${escapeHtml((state.previewLineage?.nodes || []).find((n) => n.sha256 === lineageMaskSha)?.filename || lineageMaskSha?.slice(0, 12) || "-")}`) : "父图"}</span>
+      <button type="button" class="ghost-btn lineage-compare-close" data-lineage-compare-close>返回</button>
+    </div>`;
+    return;
+  }
   if (state.previewView === "graph") {
     image.style.display = "none";
     stage.style.display = "block";
@@ -3709,6 +3954,72 @@ function renderPreviewStage() {
     stage.style.display = "none";
     stage.innerHTML = "";
   }
+}
+
+/**
+ * 遮罩范围叠加层(对比视图「遮罩」模式)。
+ * 数据源:派生层 mask_scopes(工作流参数),而非 mask 源图文件。
+ * 渲染策略(按链参数):
+ *   - SolidMask value/width/height → 均匀填充(0.5+ 半透明,弱化遮罩区);
+ *   - LoadImage/LoadImageMask 的 image → 用该文件做遮罩(alpha 混合)并标注通道;
+ *   - GainMask/TaperedCorners → 边框示意 + 参数标注;
+ *   - 未知链 → 文本降级(显示链节点参数)。
+ */
+function renderMaskScopeOverlay(scopes, lineageMaskSha) {
+  if (!scopes || !scopes.length) {
+    // 无参数数据,但有 lineage mask 源图:回退为"遮罩源图"说明(不绘制范围)
+    return lineageMaskSha
+      ? `<div class="lineage-compare-mask-overlay"><div class="lineage-compare-mask-note">遮罩源图(无参数链,范围未知):${escapeHtml(lineageMaskSha.slice(0, 12))}</div></div>`
+      : "";
+  }
+  // 聚合所有 mask_scopes 的链节点(去重,保留顺序)
+  const nodes = [];
+  for (const s of scopes) {
+    for (const n of s.scope?.nodes || []) {
+      if (!nodes.some((x) => x.node_id === n.node_id && x.class_type === n.class_type)) {
+        nodes.push(n);
+      }
+    }
+  }
+  // 找范围定义:优先 SolidMask(矩形),其次 LoadImage(alpha 图),标注其它
+  const solid = nodes.find((n) => (n.class_type || "").toLowerCase().includes("solidmask"));
+  const loader = nodes.find((n) => (n.class_type || "").toLowerCase().includes("loadimage"));
+  const grow = nodes.find((n) => (n.class_type || "").toLowerCase().includes("grow"));
+
+  const parts = [];
+  if (solid) {
+    const value = Number(solid.params?.value ?? 1);
+    const w = solid.params?.width;
+    const h = solid.params?.height;
+    // value 趋向 1 = 全遮罩;趋向 0 = 无遮罩。红色半透明仅表达"该区域参与遮罩"。
+    const filled = value >= 0.5;
+    const opacity = filled ? 0.28 : 0.06;
+    parts.push(
+      `<div class="lineage-compare-mask-rect" style="opacity:${opacity}"></div>` +
+        `<div class="lineage-compare-mask-note">SolidMask ${w ? ` ${w}×${h}` : ""} value=${value}${filled ? " (遮罩区)" : " (未遮罩)"}</div>`
+    );
+  } else if (loader) {
+    const file = loader.params?.image || "";
+    const channel = loader.params?.channel || "alpha";
+    // LoadImage 的 image 是文件名(非 sha),无法直接作图;仅当 lineage 提供遮罩父图 sha 时叠加。
+    const imgTag = lineageMaskSha
+      ? `<img class="lineage-compare-mask-img" src="${apiUrl(`/api/image/${lineageMaskSha}`)}" alt="" />`
+      : "";
+    parts.push(
+      `<div class="lineage-compare-mask-alpha">${imgTag}</div>` +
+        `<div class="lineage-compare-mask-note">${escapeHtml(file || "遮罩图")} · ${escapeHtml(channel)} 通道${lineageMaskSha ? "" : " (文件无法定位)"}</div>`
+    );
+  } else {
+    const info = nodes.map((n) => `${n.class_type}${n.params ? `(${JSON.stringify(n.params)})` : ""}`).join(" → ");
+    parts.push(`<div class="lineage-compare-mask-note">遮罩链:${escapeHtml(info)}</div>`);
+  }
+  if (grow) {
+    const expand = grow.params?.expand;
+    const blur = grow.params?.blur_radius;
+    const growNote = [expand != null ? `expand=${expand}` : "GrowMask", blur != null ? `blur=${blur}` : ""].filter(Boolean).join(" · ");
+    parts.push(`<div class="lineage-compare-mask-note">${escapeHtml(growNote)}</div>`);
+  }
+  return `<div class="lineage-compare-mask-overlay">${parts.join("")}</div>`;
 }
 
 /**
@@ -3791,14 +4102,25 @@ function renderDerivedSections(derived) {
     sections.push(`<section class="detail-section"><h3>ControlNet <span class="muted">${cns.length}</span></h3>
       ${cns
         .map(
-          (cn) => `
+          (cn) => {
+            // 多参考:source_chain 展示该 CN 的参考图/预处理器链(各 apply 独立)
+            const chainInfo = cn.source_chain
+              ? cn.source_chain.nodes?.map((n) => `${n.class_type}${n.params?.image ? `(${n.params.image})` : ""}`).join(" → ")
+              : "";
+            const loaderSource = cn.loader_model_source
+              ? `<div class="detail-hint">驱动模型来源:${escapeHtml(cn.loader_model_source)}</div>`
+              : "";
+            return `
         <div class="detail-sampler${cn.bypassed ? " is-muted" : ""}">
           <div class="detail-sampler-head">${escapeHtml(cn.node_type || "?")}${cn.bypassed ? " · 已 bypass" : ""}</div>
           ${previewDetailRow("模型", escapeHtml(cn.name || "-"))}
           ${cn.strength != null ? previewDetailRow("强度", String(cn.strength)) : ""}
           ${cn.start_percent != null ? previewDetailRow("生效范围", `${cn.start_percent} - ${cn.end_percent}`) : ""}
+          ${chainInfo ? previewDetailRow("参考图", escapeHtml(chainInfo)) : ""}
+          ${loaderSource}
           ${cn.bindings?.length ? previewDetailRow("绑定", cn.bindings.map((b) => `sampler ${b.sampler_id} · ${b.polarity} · steps ${b.steps ?? "-"} · 生效 ${b.effective_start_step ?? "-"}-${b.effective_end_step ?? "-"}`).join("<br>")) : ""}
-        </div>`
+        </div>`;
+          }
         )
         .join("")}</section>`);
   }
@@ -4071,6 +4393,9 @@ function closePreview() {
   state.previewItem = null;
   state.previewIndex = 0;
   state.previewDerived = null;
+  state.previewLineage = null;
+  state.previewCompareSha = null;
+  state.previewCompareMask = false;
   state.previewView = "image";
   if (objectUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
     URL.revokeObjectURL(objectUrl);
@@ -4392,10 +4717,18 @@ function applyFilterParams(params) {
     const searchInput = document.getElementById("searchInput");
     searchInput.value = search;
     document.getElementById("searchTopField").hidden = false;
-    document.getElementById("searchTopBtn").hidden = true;
-    // 与 autoResizeSearch 同逻辑:多行关键词展开高度,避免 rows=1 内滚动
+    const searchTopBtn = document.getElementById("searchTopBtn");
+    if (searchTopBtn) {
+      searchTopBtn.classList.add("is-active");
+      searchTopBtn.setAttribute("aria-expanded", "true");
+    }
+    // 与 autoResizeSearch 同逻辑:单行保持默认居中,多行关键词展开高度避免 rows=1 内滚动
     searchInput.style.height = "auto";
-    searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
+    if (searchInput.scrollHeight <= 24) {
+      searchInput.style.height = "";
+    } else {
+      searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
+    }
   }
   const filename = params.get("filename");
   if (filename) document.getElementById("filenameInput").value = filename;
@@ -4423,6 +4756,14 @@ function applyFilterParams(params) {
     const input = document.getElementById("excludeKeywordsInput");
     input.value = excludeQ;
     document.getElementById("excludeKeywordsClearBtn").hidden = false;
+    const searchAdvBtn = document.getElementById("searchAdvBtn");
+    if (searchAdvBtn) searchAdvBtn.classList.add("has-filter");
+    document.getElementById("searchTopField").hidden = false;
+    const searchTopBtn = document.getElementById("searchTopBtn");
+    if (searchTopBtn) {
+      searchTopBtn.classList.add("is-active");
+      searchTopBtn.setAttribute("aria-expanded", "true");
+    }
   }
   const fromDate = params.get("from_date");
   if (fromDate) document.getElementById("fromDate").value = formatCapturedAt(fromDate);
@@ -4548,8 +4889,13 @@ function resetFilterInputs() {
   const searchInput = document.getElementById("searchInput");
   if (searchInput.value) {
     searchInput.value = "";
+    searchInput.style.height = "";
     document.getElementById("searchTopField").hidden = true;
-    document.getElementById("searchTopBtn").hidden = false;
+    const searchTopBtn = document.getElementById("searchTopBtn");
+    if (searchTopBtn) {
+      searchTopBtn.classList.remove("is-active");
+      searchTopBtn.setAttribute("aria-expanded", "false");
+    }
   }
   document.getElementById("filenameInput").value = "";
   document.getElementById("modelComboboxInput").value = "";
@@ -4562,6 +4908,10 @@ function resetFilterInputs() {
   state.excludeLoraMode = "and";
   document.getElementById("excludeKeywordsInput").value = "";
   document.getElementById("excludeKeywordsClearBtn").hidden = true;
+  const searchAdvBtn = document.getElementById("searchAdvBtn");
+  if (searchAdvBtn) {
+    searchAdvBtn.classList.remove("has-filter");
+  }
   document.getElementById("fromDate").value = "";
   document.getElementById("toDate").value = "";
   state.favoritesOnly = false;
@@ -4589,7 +4939,7 @@ function bindFilterViews() {
   });
 }
 
-// 本地 "YYYY-MM-DD HH:mm"(air-datepicker 显示值)→ UTC ISO;空/非法返回空串
+// 本地 "YYYY-MM-DD HH:mm"(flatpickr 显示值)→ UTC ISO;空/非法返回空串
 function toUtcIso(value) {
   const v = (value || "").trim();
   if (!v) return "";
@@ -5048,20 +5398,34 @@ async function boot() {
     searchHistoryMenu.hidden = false;
   };
   const autoResizeSearch = () => {
+    if (!searchInput.value.trim()) {
+      searchInput.style.height = "";
+      return;
+    }
     searchInput.style.height = "auto";
-    searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
+    if (searchInput.scrollHeight <= 24) {
+      searchInput.style.height = "";
+    } else {
+      searchInput.style.height = `${Math.min(searchInput.scrollHeight, 160)}px`;
+    }
   };
   const collapseSearch = () => {
+    if (!searchInput.value.trim()) {
+      searchInput.style.height = "";
+    }
     searchTopField.hidden = true;
-    searchTopBtn.hidden = false;
+    if (searchTopBtn) {
+      searchTopBtn.classList.remove("is-active");
+      searchTopBtn.setAttribute("aria-expanded", "false");
+    }
   };
-  // 关闭高级面板:解除锁定,主输入为空则顺带收起(关闭面板是允许隐藏的时机之一);
+  // 关闭高级面板:解除锁定,主输入与排除词均为空则顺带收起(关闭面板是允许隐藏的时机之一);
   // collapse:false 用于与历史面板互斥切换时,避免误收起搜索框
   const closeSearchAdv = ({ collapse = true } = {}) => {
     searchAdvOpen = false;
     searchAdvMenu.hidden = true;
     searchAdvBtn.setAttribute("aria-expanded", "false");
-    if (collapse && !searchInput.value.trim()) {
+    if (collapse && !searchInput.value.trim() && !excludeKeywordsInput.value.trim()) {
       collapseSearch();
     }
   };
@@ -5072,13 +5436,23 @@ async function boot() {
     searchAdvOpen = true;
     searchAdvMenu.hidden = false;
     searchAdvBtn.setAttribute("aria-expanded", "true");
+    excludeKeywordsInput.focus();
   };
   const syncExcludeKeywordsClear = () => {
-    document.getElementById("excludeKeywordsClearBtn").hidden = !excludeKeywordsInput.value;
+    const hasValue = !!excludeKeywordsInput.value.trim();
+    document.getElementById("excludeKeywordsClearBtn").hidden = !hasValue;
+    if (searchAdvBtn) {
+      searchAdvBtn.classList.toggle("has-filter", hasValue);
+    }
   };
   if (searchTopBtn && searchTopField && searchInput) {
     searchTopBtn.addEventListener("click", () => {
-      searchTopBtn.hidden = true;
+      if (!searchTopField.hidden) {
+        collapseSearch();
+        return;
+      }
+      searchTopBtn.classList.add("is-active");
+      searchTopBtn.setAttribute("aria-expanded", "true");
       searchTopField.hidden = false;
       searchInput.focus();
       autoResizeSearch();
@@ -5110,10 +5484,19 @@ async function boot() {
         applyFilters().catch((error) => showToast(error.message, { type: "error" }));
       }, 400);
     });
-    searchInput.addEventListener("blur", () => {
-      if (!searchInput.value.trim() && !searchAdvOpen && !searchHistoryOpen) {
-        collapseSearch();
+    searchInput.addEventListener("blur", (event) => {
+      // 若焦点转移到了搜索组件内部(高级设置、排除词输入框、历史记录等),不要收起
+      if (event.relatedTarget && event.relatedTarget.closest("#searchTopField, #searchTopBtn")) {
+        return;
       }
+      setTimeout(() => {
+        if (document.activeElement && document.activeElement.closest("#searchTopField, #searchTopBtn")) {
+          return;
+        }
+        if (!searchInput.value.trim() && !excludeKeywordsInput.value.trim() && !searchAdvOpen && !searchHistoryOpen) {
+          collapseSearch();
+        }
+      }, 150);
     });
     // Escape:先关历史面板,再关高级面板;Enter(非 Shift)=完成搜索:
     // 记录历史 + 立即查询并收起搜索框、关两个面板
@@ -5148,6 +5531,10 @@ async function boot() {
   }
   // 高级面板交互:图标按钮 toggle;面板内 Escape 关闭;点击面板外关闭
   if (searchAdvBtn && searchAdvMenu && excludeKeywordsInput) {
+    searchAdvBtn.addEventListener("mousedown", (event) => {
+      // 阻止 mousedown 默认行为,避免 searchInput 触发 blur 导致搜索框被提前收起
+      event.preventDefault();
+    });
     searchAdvBtn.addEventListener("click", () => {
       if (searchAdvOpen) {
         closeSearchAdv();
@@ -5169,10 +5556,13 @@ async function boot() {
         return;
       }
       if (searchHistoryOpen) {
-        closeSearchHistory();
+        closeSearchHistory({ collapse: false });
       }
       if (searchAdvOpen) {
-        closeSearchAdv();
+        closeSearchAdv({ collapse: false });
+      }
+      if (!searchInput.value.trim() && !excludeKeywordsInput.value.trim()) {
+        collapseSearch();
       }
     });
     // 排除词输入:防抖即时搜索(面板保持打开,结果即时生效)
@@ -5459,6 +5849,70 @@ async function boot() {
       applyInlineLoraFilter(loraTrigger.dataset.loraFilter).catch((error) => showToast(error.message, { type: "error" }));
       return;
     }
+    const lineageOpen = event.target.closest("[data-lineage-open]");
+    if (lineageOpen) {
+      openLineageImage(lineageOpen.dataset.lineageOpen).catch((error) => showToast(error.message, { type: "error" }));
+      return;
+    }
+    const lineageCompare = event.target.closest("[data-lineage-compare]");
+    if (lineageCompare) {
+      state.previewCompareSha = lineageCompare.dataset.lineageCompare;
+      state.previewCompareMask = false;
+      state.previewView = "compare";
+      renderPreviewStage();
+      return;
+    }
+    if (event.target.closest("[data-lineage-compare-close]")) {
+      state.previewView = "image";
+      state.previewCompareSha = null;
+      state.previewCompareMask = false;
+      renderPreviewStage();
+      return;
+    }
+    const compareMode = event.target.closest("[data-lineage-compare-mode]");
+    if (compareMode) {
+      state.previewCompareMask = compareMode.dataset.lineageCompareMode === "mask";
+      renderPreviewStage();
+      return;
+    }
+    const lineageSearch = event.target.closest("[data-lineage-search]");
+    if (lineageSearch) {
+      const section = lineageSearch.closest(".detail-lineage");
+      const query = section?.querySelector("[data-lineage-query]")?.value?.trim();
+      const results = section?.querySelector(".lineage-search-results");
+      if (!query || !results) return;
+      results.textContent = "搜索中…";
+      fetchJson(`/api/image-refs?q=${encodeURIComponent(query)}&limit=8`)
+        .then((payload) => {
+          results.innerHTML = (payload.items || []).map((item) => `<button type="button" class="lineage-search-result" data-lineage-bind="${escapeHtml(item.sha256 || "")}">${escapeHtml(item.filename || item.sha256 || "-")}</button>`).join("") || '<span class="muted">无匹配图片</span>';
+        })
+        .catch((error) => { results.textContent = error.message; });
+      return;
+    }
+    const lineageBind = event.target.closest("[data-lineage-bind]");
+    if (lineageBind) {
+      const child = state.previewItem?.images?.[state.previewIndex]?.sha256;
+      const relation = lineageBind.closest(".detail-lineage")?.querySelector("[data-lineage-relation]")?.value || "i2i";
+      if (!child || !lineageBind.dataset.lineageBind) return;
+      fetchJson(`/api/image/${encodeURIComponent(child)}/lineage/manual`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relation_type: relation, parent_sha256s: [lineageBind.dataset.lineageBind] }),
+      }).then(() => loadPreviewLineage(child)).catch((error) => showToast(error.message, { type: "error" }));
+      return;
+    }
+    const lineageClear = event.target.closest("[data-lineage-clear]");
+    if (lineageClear) {
+      const child = state.previewItem?.images?.[state.previewIndex]?.sha256;
+      const relation = lineageClear.closest(".detail-lineage")?.querySelector("[data-lineage-relation]")?.value || "i2i";
+      if (!child) return;
+      fetchJson(`/api/image/${encodeURIComponent(child)}/lineage/manual`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relation_type: relation, parent_sha256s: [] }),
+      }).then(() => loadPreviewLineage(child)).catch((error) => showToast(error.message, { type: "error" }));
+      return;
+    }
     const stripTrigger = event.target.closest("[data-preview-strip-index]");
     if (!stripTrigger) {
       return;
@@ -5466,6 +5920,66 @@ async function boot() {
     state.previewIndex = Number(stripTrigger.dataset.previewStripIndex || "0");
     syncPreviewView();
   });
+  // 预览弹层头部:收藏按钮(未分类)+ 备注输入。
+  // 备注回车/失焦保存;保存即 upsert「未分类」收藏行(备注与收藏同一行),
+  // 因此只写备注也会先把图收藏到未分类 —— placeholder/title 已写明。
+  const previewFavBtn = document.getElementById("previewFavBtn");
+  const previewFavNote = document.getElementById("previewFavNote");
+  if (previewFavBtn && previewFavNote) {
+    const previewImage = () => (state.previewItem?.images || [])[state.previewIndex || 0] || {};
+    const previewFavMeta = (image, note) => ({
+      filename: image.filename || "",
+      batch_key: state.previewItem?.batch?.key || state.previewItem?.item?.batch?.key || "",
+      captured_at: image.captured_at || "",
+      category: "",
+      note,
+    });
+    previewFavBtn.addEventListener("click", async () => {
+      const image = previewImage();
+      const sha = String(image.sha256 || previewFavBtn.dataset.previewFavSha || "");
+      if (!sha) {
+        return;
+      }
+      try {
+        if (state.favorites.has(sha)) {
+          await removeFavorite(sha);
+        } else {
+          await upsertFavorite(sha, previewFavMeta(image, previewFavNote.value.trim()));
+        }
+        syncPreviewFavControls();
+      } catch (error) {
+        showToast(error.message || "收藏失败", { type: "error" });
+      }
+    });
+    const savePreviewNote = async () => {
+      const image = previewImage();
+      const sha = String(image.sha256 || previewFavNote.dataset.previewFavSha || "");
+      if (!sha) {
+        return;
+      }
+      const existing = state.favoriteMeta.get(sha) || {};
+      const next = previewFavNote.value.trim();
+      if (String(existing.note || "") === next) {
+        return;
+      }
+      try {
+        await upsertFavorite(sha, previewFavMeta(image, next));
+        syncPreviewFavControls();
+        showToast("备注已保存(收藏到未分类)", { type: "success", duration: 1500 });
+      } catch (error) {
+        showToast(error.message || "备注保存失败", { type: "error" });
+      }
+    };
+    previewFavNote.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void savePreviewNote();
+      }
+    });
+    previewFavNote.addEventListener("blur", () => {
+      void savePreviewNote();
+    });
+  }
   // 预览左侧竖列每张缩略图旁的「待处理」checkbox(委托 change):勾选 = 加入左下角待处理,
   // 取消 = 移出;不直接收藏,收藏走详情 tag 点击或左下角批量操作。
   document.getElementById("imagePreviewModal").addEventListener("change", (event) => {
@@ -5492,6 +6006,12 @@ async function boot() {
     renderPreviewStrip(state.previewItem?.images || [], state.previewIndex || 0);
     syncBulkUi();
     persistSelection();
+  });
+  document.getElementById("imagePreviewModal").addEventListener("input", (event) => {
+    const slider = event.target.closest?.(".lineage-compare-slider");
+    if (!slider) return;
+    const overlay = slider.closest(".lineage-compare-stage")?.querySelector(".lineage-compare-overlay");
+    if (overlay) overlay.style.width = `${slider.value}%`;
   });
   document.getElementById("imagePreviewImg").addEventListener("click", () => {
     document.getElementById("imagePreviewBody").classList.toggle("is-zoomed");
@@ -5581,6 +6101,6 @@ async function boot() {
 }
 
 boot().catch((error) => {
-  document.getElementById("resultsList").innerHTML = `<div class="empty">加载失败: ${error.message}</div>`;
+  document.getElementById("resultsList").innerHTML = `<div class="empty">加载失败: ${escapeHtml(error.message)}</div>`;
   showToast(error.message, { type: "error" });
 });

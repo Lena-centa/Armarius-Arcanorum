@@ -339,7 +339,7 @@ check_required_deps() {
       # WSL/Linux 下 Windows 盘符形式路径仅本脚本可转换,应用层(NestJS)不会转换,
       # 会报"不存在"并空转 sync —— 显式提示,避免 check 通过但启动后无效
       if [[ "${COMFY_SCAN_ROOT}" =~ ^[A-Za-z]:[/\\] ]]; then
-        echo "  WARNING: COMFY_SCAN_ROOT 为 Windows 盘符形式(${COMFY_SCAN_ROOT}),当前平台非 Windows,应用层无法识别,请在设置页配置 POSIX 形式(如 /mnt/d/erxx)后重启" >&2
+        echo "  WARNING: COMFY_SCAN_ROOT 为 Windows 盘符形式(${COMFY_SCAN_ROOT}),当前平台非 Windows,应用层无法识别,请在设置页配置 POSIX 形式(如 /mnt/d/ComfyUI/output)后重启" >&2
       fi
     else
       echo "  FAIL: COMFY_SCAN_ROOT 已配置但不存在: ${COMFY_SCAN_ROOT}" >&2

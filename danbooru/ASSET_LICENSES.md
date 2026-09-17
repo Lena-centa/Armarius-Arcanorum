@@ -95,7 +95,7 @@ from a specific source; contributors are attributed per table.
 | `tag_alias` (`alias, tag_id, freq, pos`) | canonical names + multi-language aliases | canonical names from nyanko vocab; `other_names` aliases from isek-ai wiki | MIT (nyanko) + CC BY-SA 4.0 for the alias strings drawn from wiki |
 | `edges` (`src_id, dst_id, count, pmi, llr`) | top-50 LLR co-occurrence neighbors | nyanko posts snapshot | MIT (nyanko); numeric statistics, not source text |
 | `tag_gnn_nn` (`tag_id, nn_id, cos`) | top-50 GNN cosine neighbors per tag | computed from `embed_gnn.npy` (trained on nyanko snapshot) | MIT (nyanko); numeric statistics |
-| `tag_category` (`tag_id, category`) | semantic bucket per tag | derived by `tools/p9_semantic.py` keyword rules on tag names | project-authored rules; tag names are facts |
+| `tag_category` (`tag_id, category`) | semantic bucket per tag | derived by project-authored keyword rules on tag names | project-authored rules; tag names are facts |
 | `wiki_traits` (`tag_id, trait_id, vote, vote_official`) | wiki example-image (`!post #id`) tag votes per wiki page title | isek-ai wiki reference-image markers joined with nyanko post tags | CC BY-SA 4.0 (isek-ai) for the wiki-sourced trait relationships |
 | `vocab_sorted.npy` | lexicographic tag-name array | nyanko vocab | MIT (nyanko) |
 | `embed_gnn.npy` | GNN tag embeddings | trained on nyanko posts snapshot | MIT (nyanko) |
@@ -118,27 +118,27 @@ All previous auxiliary dependencies (such as `ThetaCursed/danbooru-2026-clean-me
 ## 4. Rebuilding the database yourself
 
 Anyone may rebuild the assets locally from the upstream datasets. The build is
-one-shot and offline; it requires the `D:/gnn` venv python (numpy, pandas,
+one-shot and offline; it requires the `<dnndev>` venv python (numpy, pandas,
 pyarrow) and the two upstream parquet files fetched from the URLs above.
 
 ```bash
 # Full build: produces danbooru/danbooru.sqlite3 + vocab_sorted.npy + embed_gnn.npy
-python utils/build_danbooru_db.py [--src D:/gnn/out] [--block 4096]
+python utils/build_danbooru_db.py [--src <dnndev>/out] [--block 4096]
 
 # Add tag_category + wiki_traits to an existing db without rebuilding the
 # expensive tag_gnn_nn table (idempotent). Requires p9 outputs:
-#   D:/gnn/scripts/p9_semantic.py  ->  tag_category.parquet / wiki_traits.parquet
-python utils/build_danbooru_db.py --patch-semantic [--src D:/gnn/out]
+#   <dnndev>/scripts/p9_semantic.py  ->  tag_category.parquet / wiki_traits.parquet
+python utils/build_danbooru_db.py --patch-semantic [--src <dnndev>/out]
 
 # Extend the tags table with ALL snapshot character/copyright tags missing
 # from the GNN vocab (recent tags, offset ids 112283+), backfill name_pc,
 # wiki aliases, tag_category, and wiki_traits for new titles (idempotent):
 python utils/build_danbooru_db.py --patch-characters \
-    [--snapshot D:/gnn/out/posts-snapshot.parquet]
+    [--snapshot <dnndev>/out/posts-snapshot.parquet]
 ```
 
-The exact `D:/gnn/out/*.parquet` inputs referenced by `build_danbooru_db.py`
-and `p9_semantic.py` are produced by the `D:/gnn` pipeline (vocab, tag_texts,
+The exact `<dnndev>/out/*.parquet` inputs referenced by `build_danbooru_db.py`
+and `p9_semantic.py` are produced by the `<dnndev>` pipeline (vocab, tag_texts,
 edges, embed_gnn, wiki_extra, wiki_post_tags). A rebuilt database must carry
 this notice and the same per-table attribution when redistributed.
 

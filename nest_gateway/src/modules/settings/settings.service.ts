@@ -106,7 +106,7 @@ const META: SettingsMeta[] = [
     key: 'COMFY_SCAN_ROOT',
     group: '扫描与 ComfyUI',
     label: '扫描根目录',
-    description: '归档根目录,如 D:/erxx 或 /mnt/d/erxx',
+    description: '归档根目录,如 D:/comfy_output 或 /mnt/d/comfy_output',
     type: 'text',
     defaultValue: '',
   },
@@ -309,7 +309,7 @@ export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
   private readonly envPath: string;
   private readonly dataDir: string;
-  /** 平台覆盖文件名(.env.windows / .env.wsl),由 GPT 补丁引入的平台隔离机制。 */
+  /** 平台覆盖文件名(.env.windows / .env.wsl),按平台隔离配置的加载机制。 */
   private readonly platformEnvFile: string;
 
   constructor(@Optional() @Inject(SETTINGS_DATA_DIR) dataDir?: string) {

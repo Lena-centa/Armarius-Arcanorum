@@ -23,7 +23,7 @@ _PLAIN_TEXT_TYPES = (set(TEXT_NODE_TYPES) - {
 _CONCAT_TEXT_TYPES = {"Text Concatenate", "Text Concatenate (JPS)", "CR Text Concatenate"}
 # 受控扩展:CR/ZML 变体拼接节点(字段名与分隔符键不同,行为与 concat 一致)
 _CONCAT_FIELDS: dict[str, tuple[str, ...]] = {
-    "Text Concatenate": ("text_a", "text_b"),
+    "Text Concatenate": ("text_a", "text_b", "text_c", "text_d"),
     "Text Concatenate (JPS)": tuple(f"text{i}" for i in range(1, 6)),
     "CR Text Concatenate": ("text1", "text2"),
     "CR Combine Prompt": ("part1", "part2", "part3", "part4"),
@@ -256,6 +256,10 @@ def _resolve_node_text(
         return [delimiter.join(chunks)] if chunks else []
     if class_type == "Text to Conditioning":
         return _component_values(nodes, inputs.get("text"), depth=depth + 1, max_depth=max_depth, visited=set(visited), branch=branch)
+    if "showanything" in class_type.lower() or "showtext" in class_type.lower():
+        for key in ("anything", "text", "string"):
+            if key in inputs:
+                return _component_values(nodes, inputs.get(key), depth=depth + 1, max_depth=max_depth, visited=set(visited), branch=branch)
     # 未知节点作为 text 组件连入时,按分支名/通用文本字段/组织器 widget_data 提取字面量
     texts = _literal_texts(inputs, branch)
     if texts:
@@ -394,6 +398,12 @@ def recover_text(
             text_value = inputs.get("text")
             if _link(text_value) is not None:
                 next_values.append((text_value, True))
+        elif "showanything" in class_type.lower() or "showtext" in class_type.lower():
+            for key in ("anything", "text", "string"):
+                val = inputs.get(key)
+                if _link(val) is not None:
+                    next_values.append((val, True))
+                    break
         elif "conditioning" in inputs and class_type not in _CONDITIONING_TERMINATORS:
             # 未知节点的 conditioning 透传;ZeroOut 等清空型节点视为空条件终止
             conditioning = inputs.get("conditioning")
@@ -435,7 +445,7 @@ def _sampler_nodes(graph: dict[str, dict[str, Any]]) -> list[tuple[str, dict[str
         lowered = class_type.lower()
         # guider(CFGGuider 等)同样持 positive/negative conditioning,作为恢复起点
         if ("sampler" in lowered or "guider" in lowered) and (
-            "positive" in inputs or "negative" in inputs
+            "positive" in inputs or "negative" in inputs or "guider" in inputs
         ):
             samplers.append((node_id, node))
     return samplers
@@ -523,10 +533,16 @@ def apply(record: dict[str, object]) -> dict[str, object]:
             for branch in ("positive", "negative"):
                 if not missing[branch]:
                     continue
-                linked_id = _link(sampler_inputs.get(branch))
+                branch_val = sampler_inputs.get(branch)
+                if not branch_val and "guider" in sampler_inputs:
+                    g_link = _link(sampler_inputs.get("guider"))
+                    if g_link:
+                        guider_node = graph.get(g_link) or {}
+                        branch_val = guider_node.get("inputs", {}).get(branch)
+                linked_id = _link(branch_val)
                 if linked_id is None:
                     continue
-                link_value = sampler_inputs.get(branch)
+                link_value = branch_val
                 output_slot = None
                 if isinstance(link_value, (list, tuple)) and len(link_value) >= 2:
                     try:

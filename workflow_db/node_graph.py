@@ -3,7 +3,7 @@
 将可执行工作流(API prompt 图,有向无环)抽象为 {nodes, edges, groups},
 供前端可视化与逻辑分析。纯派生层:不动 parser.py、不改 record schema。
 
-设计契约:docs/parser/KNOWN_GAPS.md §3.2(派生层契约)+ 2026-08-03 对话决策
+设计契约: 派生层节点图契约规范
 (按需派生不落库;UI workflow 存在时 links 提供权威 link type,纯 API 图用
 字段名推断;workflow version==1 的 links 为对象数组,需双格式兼容)。
 
@@ -117,7 +117,9 @@ def build_node_graph(
         entry = {
             "id": nid,
             "class_type": ct,
-            "title": ((node.get("_meta") or {}).get("title") or wfn.get("title") or wfn.get("type") or ct),
+            # 节点名保持原样:用原始类型名,不取 _meta.title / UI 节点 title
+            # (那是前端按界面语言写入的本地化名,如「Checkpoint加载器(简易)」)
+            "title": (wfn.get("type") or ct),
             "role": role,
             "polarity": None,
             "bypassed": bypassed,

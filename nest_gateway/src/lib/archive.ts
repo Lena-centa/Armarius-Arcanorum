@@ -332,6 +332,7 @@ export async function archiveGeneratedOutputs(
   sqliteDb?: Database.Database,
   skipMongo = false,
   instance?: InstanceStamp,
+  onRecordWritten?: (record: Record<string, unknown>) => Promise<void>,
 ): Promise<ArchiveResult> {
   // 只归档 type=output 的输出图(temp/input 等中间产物不入库)
   const outputImages = (summary.images ?? []).filter(
@@ -521,6 +522,13 @@ export async function archiveGeneratedOutputs(
     touchedBatches.add(batchKey);
     resolvedPaths.push(resolvedPath);
     affectedRecipeKeys.add(recipeKey);
+    if (onRecordWritten) {
+      try {
+        await onRecordWritten(record);
+      } catch {
+        // Lineage is additive; archive success must not depend on it.
+      }
+    }
     // 旧 key 与新 key 不同时,旧组的聚合结果也失效了
     if (existingRecipeKey && existingRecipeKey !== recipeKey) {
       affectedRecipeKeys.add(existingRecipeKey);
