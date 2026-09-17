@@ -8,19 +8,29 @@
  * (dist/modules/static → dist/modules → dist → nest_gateway → 仓库根)。
  */
 import { Module } from '@nestjs/common';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { PagesController } from './pages.controller';
 
 /**
  * Static asset layout:
- *   <repo>/workflow_db/static  (pages served by PagesController,
- *    vendor/ subdirs included)
+ *   <repo>/workflow_db/static_hud (active HUD UI if present)
+ *   <repo>/workflow_db/static     (baseline fallback)
  *
  * PagesController serves extensionless page routes from explicit routes and
  * mounts the whole static dir at /static, including the no-store cache
  * policy on pages.
  */
-export const STATIC_DIR = join(
+const hudDir = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  'workflow_db',
+  'static_hud',
+);
+const defaultDir = join(
   __dirname,
   '..',
   '..',
@@ -29,6 +39,10 @@ export const STATIC_DIR = join(
   'workflow_db',
   'static',
 );
+
+export const STATIC_DIR =
+  process.env.WORKFLOW_DB_STATIC_DIR ||
+  (existsSync(hudDir) ? hudDir : defaultDir);
 
 @Module({
   controllers: [PagesController],

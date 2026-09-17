@@ -23,7 +23,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Inject } from '@nestjs/common';
+import { Inject, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
 import type Database from 'better-sqlite3';
@@ -36,6 +36,8 @@ import {
 } from 'fs';
 import { isAbsolute, join, relative, resolve } from 'path';
 import {
+  Favorites,
+  FavoritesDocument,
   Images,
   ImagesDocument,
   StatsDocs,
@@ -57,12 +59,14 @@ import {
 } from '../../lib/comfy-history-poller';
 import { PendingBuffer, isImageFile } from '../../lib/comfy-pending';
 import { imageEntryFromRecord } from '../../lib/archive';
+import { collectPreferencePrompts } from '../../lib/tag-preferences';
 import { normalizePathForPlatform } from '../../lib/paths';
 import { recipeCoverage } from '../../sqlite/reader';
 import { readBatchByPath } from '../../sqlite/repo';
 import { rebuildRecipeGroupsSqlite } from '../../lib/recipe_groups';
 import { InstanceStamp, instanceStamp } from '../../lib/instance';
 import { BackupService } from './backup.service';
+import { LineageService } from '../lineage/lineage.service';
 
 /** 读 SQLite 批次内单条图片的 size/mtime(flush diff 用)。 */
 /**
@@ -232,6 +236,7 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly parseWorker: ParseWorkerService,
     private readonly backup: BackupService,
+    private readonly lineage: LineageService,
     @InjectModel(Images.name)
     private readonly imagesModel: Model<ImagesDocument>,
     @InjectModel(StatsDocs.name)
@@ -242,6 +247,9 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
     private readonly recipeGroupModel: Model<RecipeGroupsDocument>,
     @InjectConnection() private readonly connection: Connection,
     @Inject(SQLITE_DB) private readonly sqliteDb: Database.Database,
+    @Optional()
+    @InjectModel(Favorites.name)
+    private readonly favoritesModel?: Model<FavoritesDocument>,
   ) {
     // 从配置加载全部运行参数;缺省:扫描根空串、同步 300s、ComfyUI 输出目录空、
     // flush 15s、不双写、不切读、非纯远程;实例打标按配置生成
@@ -259,6 +267,22 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
       {};
     this.tagSuggestEnabled = tagSuggest.enabled !== false;
     this.danbooruAssets = (tagSuggest.assetsDir ?? '').trim();
+  }
+
+  /**
+   * 血缘等附加数据的守护入口:失败仅记日志,不得影响主入库/删除链路
+   * (与 archive.ts / ingest.ts 对 onRecordWritten 的防护口径一致)。
+   */
+  private async safeLineage(task: () => Promise<unknown>): Promise<void> {
+    try {
+      await task();
+    } catch (err) {
+      this.logger.debug(
+        `lineage post-processing skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   async onModuleInit(): Promise<void> {
@@ -416,6 +440,17 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
     };
     this.logger.log('sync started');
 
+    // 批次键集合 diff(观测补丁):增量同步曾观测到可见批次瞬态 +1(约 20s
+    // 自愈,根因未定位)。每轮记录键集合变化——若瞬态是"重键/孤儿行"窗口,
+    // 这里会打出 -旧键 +新键 的配对,据此定位。
+    const batchKeysBefore = this.sqliteDb
+      ? new Set(
+          (this.sqliteDb.prepare('SELECT batch_key FROM batches').all() as Array<{
+            batch_key: string;
+          }>).map((row) => row.batch_key),
+        )
+      : null;
+
     try {
       // 解析回调:统一走 parseWorker(子进程 JSON-RPC 解析)
       const parseFn = async (path: string, scanRoot: string) =>
@@ -438,6 +473,7 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
           skipMongo: this.readMode,
           // 多网关实例打标
           instance: this.instanceStamp,
+          onRecordWritten: (record) => this.lineage.refreshRecord(record).then(() => undefined),
         },
       );
 
@@ -463,6 +499,24 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
           `new=${summary.new} changed=${summary.changed} removed=${summary.removed} ` +
           `deduped=${summary.deduped} failed=${summary.failed}`,
       );
+
+      // 批次键 diff 打印(仅键集合变化时;截断防刷屏)
+      if (batchKeysBefore) {
+        const after = new Set(
+          (this.sqliteDb.prepare('SELECT batch_key FROM batches').all() as Array<{
+            batch_key: string;
+          }>).map((row) => row.batch_key),
+        );
+        const added = [...after].filter((key) => !batchKeysBefore.has(key));
+        const removed = [...batchKeysBefore].filter((key) => !after.has(key));
+        if (added.length || removed.length) {
+          this.logger.log(
+            `batch keys diff: +${added.length} -${removed.length}` +
+              (added.length ? ` added=${added.slice(0, 8).join(' | ')}` : '') +
+              (removed.length ? ` removed=${removed.slice(0, 8).join(' | ')}` : ''),
+          );
+        }
+      }
 
       // 同步后自恢复 recipe_groups
       await this.recipeGroupsSelfHeal();
@@ -511,7 +565,28 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
         `INSERT OR REPLACE INTO batch_tag_suggestions
          (batch_key, payload, updated_at) VALUES (?, ?, ?)`,
       );
+      // 人工偏好信号(数据飞轮的反馈半环):把用户收藏图片的 positive prompt
+      // 取出来,随每个批次一并下发,worker 侧对命中这些 tag 的候选加权。
+      // 只采一次(整轮共用):收藏集合与本轮批次无关,循环内重复查库是浪费。
+      // 采集失败按无偏好处理——推荐可用性不该被偏好采集拖垮。
+      let preferredTags: string[] | undefined;
+      try {
+        const prompts = await collectPreferencePrompts({
+          config: this.config,
+          sqliteDb: this.sqliteDb,
+          favoritesModel: this.favoritesModel ?? null,
+          imagesModel: this.imagesModel,
+        });
+        if (prompts.length) preferredTags = prompts;
+      } catch (err) {
+        this.logger.debug(
+          `preference prompts unavailable: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
       let done = 0;
+      let empty = 0;
       for (const row of rows) {
         try {
           const doc = JSON.parse(row.doc_json) as {
@@ -520,9 +595,36 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
           const texts = (doc?.prompts?.positive ?? [])
             .map((p) => (typeof p?.text === 'string' ? p.text : ''))
             .filter(Boolean);
-          if (!texts.length) continue;
-          const result = await this.parseWorker.suggestTags(texts, row.batch_key);
+          if (!texts.length) {
+            // 无 positive 文本:worker 无从推荐。写一条空结果哨兵,
+            // 使该批次脱离 `WHERE s.batch_key IS NULL` 的待办集合——
+            // 否则每轮同步都会重新取出并反序列化这批空批次(空转)。
+            insert.run(
+              row.batch_key,
+              JSON.stringify({
+                enabled: true,
+                tags: [],
+                groups: [],
+                sources: [],
+                empty: true,
+              }),
+              new Date().toISOString(),
+            );
+            empty += 1;
+            continue;
+          }
+          const result = await this.parseWorker.suggestTags(
+            texts,
+            row.batch_key,
+            10,
+            preferredTags,
+          );
           if (!result || result.enabled === false) {
+            // 只有"能力未就绪"(GNN 资产缺失 / worker 不可用)会走到这里:
+            // 单批次无有效推荐由 worker 返回 enabled:true + 空 tags/groups
+            // 表达(见 workflow_db/tag_suggest.py suggest),不会走到本分支。
+            // 此处中止本轮是刻意的——资产未就绪时后续批次同样算不了,
+            // 留待资产就绪后的轮次补齐;不写记录以免把"未算"当"已算"。
             this.logger.warn(
               'tag suggest unavailable (worker enabled:false), skipping this round',
             );
@@ -536,8 +638,10 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
           );
         }
       }
-      if (done > 0) {
-        this.logger.log(`tag suggestions computed: ${done}/${rows.length}`);
+      if (done > 0 || empty > 0) {
+        this.logger.log(
+          `tag suggestions computed: ${done} (+${empty} empty sentinel)/${rows.length}`,
+        );
       }
     } catch (err) {
       this.logger.warn(`tag suggest backfill error: ${(err as Error).message}`);
@@ -584,6 +688,9 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
 
       // 删除分支:幂等删除该路径在 Mongo/SQLite 中的记录
       if (eventType === 'deleted' || eventType === 'removed') {
+        await this.safeLineage(() =>
+          this.lineage.removeImageByPath(resolvedPath),
+        );
         const oldKey = await removeSingleRecordByPath(
           resolvedPath,
           this.imagesModel,
@@ -617,6 +724,7 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
         this.readMode,
         this.instanceStamp,
       );
+      await this.safeLineage(() => this.lineage.refreshRecord(record));
       this.watcherState.processedCount += 1;
       return {
         action: 'upserted',
@@ -912,6 +1020,7 @@ export class OrchestrationService implements OnModuleInit, OnModuleDestroy {
             this.readMode,
             this.instanceStamp,
           );
+          await this.safeLineage(() => this.lineage.refreshRecord(record));
           processed += 1;
         } catch (err) {
           failed += 1;

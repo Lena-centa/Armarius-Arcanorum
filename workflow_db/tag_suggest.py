@@ -4,9 +4,9 @@
 
   suggest(tag_list)  组推荐(需求 2,扫描入库时预计算):
       batch 的 prompt tag 组作为多输入 → GNN 嵌入均值查询 → 候选池 120 →
-      单 tag 得分 + 两两组一致性(rel + 0.5*coh)。逻辑照搬 D:/gnn 的
+      单 tag 得分 + 两两组一致性(rel + 0.5*coh)。逻辑照搬 <dnndev> 的
       p6_suggest_group.py(本地 FP-growth boost 留二期)。
-      资产:vocab_sorted.npy + embed_gnn.npy(tools/build_danbooru_db.py 产出,
+      资产:vocab_sorted.npy + embed_gnn.npy(utils/build_danbooru_db.py 产出,
       纯 numpy,免 pandas/pyarrow 依赖)。
 
 设计原则:网关运行时零 ML —— 联想/单 tag 索引走 SQLite 查表(见
@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import Any
 
 # 资产目录:env DANBOORU_ASSETS 优先,默认 <repo_root>/danbooru
-# (tools/build_danbooru_db.py 的产出目录)。
+# (utils/build_danbooru_db.py 的产出目录)。
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# 组推荐候选池与组一致性权重(与 p6_suggest_group.py 对齐)。
+# 组推荐候选池与组一致性权重(与 <dnndev>/scripts/p6_suggest_group.py 对齐)。
 _CANDIDATES = 120
 _GROUP_W_COHERENCE = 0.5
 
@@ -163,10 +163,48 @@ def _load() -> dict[str, Any] | None:
         return None
 
 
-def suggest(tag_list: list[str], top_k: int = 10) -> dict[str, Any] | None:
+def preference_boost(
+    ids: list[int],
+    preferred_ids: set[int],
+    weight: float,
+) -> list[float]:
+    """人工偏好加权:命中收藏/批注的候选加一个常数分。
+
+    数据飞轮的反馈半环:收藏(`favorites`)与提示词批注(`prompt_annotations`)
+    是用户对生成结果的真实评价,此前没有任何业务逻辑消费它们。
+    这里把用户偏好过的 tag 命中的候选抬升 `weight` 分。
+
+    为什么用加性常数而非乘性:分数是 GNN 余弦相似度(有负值、尺度不定),
+    乘性加权在负数上会反向。加性常数保持原序的相对关系,只在偏好项上
+    做同等抬升——语义是"同分优先取偏好的",不是"偏好的一律压倒"。
+
+    为什么在 Python 侧做:偏好集合由网关从库内查出(它才连得着
+    favorites/prompt_annotations),作为 id 集合传入;worker 只做纯计算,
+    不访问存储(本模块的设计原则)。
+
+    @param ids          候选 tag 的 vocab id(与 preferred_ids 同编码)
+    @param preferred_ids 用户偏好 tag 的 vocab id 集合(空集 = 无偏好)
+    @param weight       抬升幅度;<=0 视为关闭加权(默认路径不变)
+    @returns 与 ids 等长的加分量(无偏好/关闭时全 0)
+    """
+    if weight <= 0 or not preferred_ids:
+        return [0.0] * len(ids)
+    return [weight if tid in preferred_ids else 0.0 for tid in ids]
+
+
+def suggest(
+    tag_list: list[str],
+    top_k: int = 10,
+    preferred_tags: set[str] | None = None,
+    preference_weight: float = 0.05,
+) -> dict[str, Any] | None:
     """组推荐:tag 组 → GNN 均值查询 → 单 tag + 二元组推荐。
 
     命中 vocab 的 tag <2 个时返回空结果(防噪,与方案一致)。
+
+    人工偏好加权:`preferred_tags` 是用户收藏过的 tag(词表规范形),
+    命中的候选按 `preference_weight` 抬升——数据飞轮的反馈半环,让用户的
+    实际收藏回到推荐里。默认(空集)完全等价于加权前的行为。
     """
     assets = _load()
     if assets is None:
@@ -193,18 +231,30 @@ def suggest(tag_list: list[str], top_k: int = 10) -> dict[str, Any] | None:
     for tid in qids:
         sim[tid] = -1.0
     cand = np.argsort(-sim)[:_CANDIDATES]
+    cand_ids = [int(c) for c in cand]
     cand_score = sim[cand]
 
+    # 偏好加权在候选池上做:先抬分再排序,让偏好的候选进得了单 tag 榜
+    preferred_ids = {
+        tag2id[norm_key(tag)]
+        for tag in (preferred_tags or set())
+        if norm_key(tag) in tag2id
+    }
+    boost = preference_boost(cand_ids, preferred_ids, preference_weight)
+    boosted_score = [float(cand_score[i]) + boost[i] for i in range(len(cand_ids))]
+
+    order = sorted(range(len(cand_ids)), key=lambda i: -boosted_score[i])
     singles = [
-        {"name": id2tag[int(c)], "score": round(float(cand_score[i]), 4)}
-        for i, c in enumerate(cand[:top_k])
+        {"name": id2tag[cand_ids[i]], "score": round(boosted_score[i], 4)}
+        for i in order[:top_k]
     ]
 
     groups: list[tuple[float, list[str]]] = []
     for (i, x), (j, y) in itertools.combinations(enumerate(cand.tolist()), 2):
         ta, tb = id2tag[int(x)], id2tag[int(y)]
         coherence = float(emb[int(x)] @ emb[int(y)])
-        relevance = (float(cand_score[i]) + float(cand_score[j])) / 2.0
+        # 组相关性取加权后分数:偏好 tag 参与的组同样受益
+        relevance = (boosted_score[i] + boosted_score[j]) / 2.0
         groups.append((relevance + _GROUP_W_COHERENCE * coherence, [ta, tb]))
     groups.sort(key=lambda item: -item[0])
     top_groups = [

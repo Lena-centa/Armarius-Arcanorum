@@ -30,7 +30,7 @@ export type ImagesDocument = HydratedDocument<Images>;
  * 全部经 Schema.Types.Mixed 存储,避免 mongoose 做类型强转;
  * 注意:与 contracts/record.ts 的 LinkValueSchema 语义对应但定义有差异
  * (本处含 null、无 array;zod 侧含 array、无 null;record.schema.json 为三态),
- * 变更契约需按 AGENTS.md 门槛三端同步 + fixtures 回归。
+ * 变更契约需三端同步 + fixtures 回归(门槛见 DEVELOPER_GUIDE.md)。
  */
 export type LinkValue = string | number | Record<string, unknown> | null;
 

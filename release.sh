@@ -24,7 +24,7 @@
 #   ./release.sh --with-danbooru      # 显式包含 GNN/SQLite 查表资产(约 860MB);
 #                                      # 资产需先用 utils/build_danbooru_db.py 构建,
 #                                      # 并遵守 danbooru/ASSET_LICENSES.md 的分发要求
-#   ./release.sh --allow-parser-degraded v0.1.0-beta.1
+#   ./release.sh --allow-parser-degraded v0.1.0-beta.2
 #                                    # parser 回归失败时仍构建带 -pdeg 标记的预发布包
 #
 # 保留(运行时必需):
@@ -37,7 +37,7 @@
 #   workflow_db/(运行时 Python 包 + 静态前端)
 #
 # 剔除(开发相关内容,详见 EXCLUDES):
-#   全部 docs/、AGENTS.md、API_DESIGN.md、开发日志/规划、benchmarks/、tools/、
+#   全部 docs/、开发文档与规划、benchmarks/、tools/、
 #   tests/、workflow_automatic/、comfy_generator/、err_log/(调试探针归档)、
 #   .vscode/、__pycache__/ 等
 # ============================================================================
@@ -125,12 +125,9 @@ OUT="${OUT_DIR}/${PROJECT}_${BUILD_ID}.zip"
 # 剔除清单:开发环境痕迹 / 开发文档 / 开发工具
 # ---------------------------------------------------------------------------
 EXCLUDES=(
-  AGENTS.md
   API_DESIGN.md
   IMPLEMENTATION_LOG.md
   MIGRATION_CHANGELOG.md
-  oc_prompting.md
-  opencode.json
   todo.md
   UI_UPDATE_GUIDE.md
   release.sh
@@ -145,9 +142,7 @@ EXCLUDES=(
   comfy_generator/
   err_log/
   .github/
-  .superpowers/
   .vscode/
-  .opencode/
   __pycache__/
   nest_gateway/src/
   nest_gateway/test/
@@ -175,7 +170,7 @@ echo "  BUILD: nest_gateway 自动构建 dist..."
 echo "  OK: dist 构建完成"
 
 # ---------------------------------------------------------------------------
-# 回归门禁:parser 冻结核心 fixtures 回归全绿才允许打包(见 AGENTS.md 修改门槛),
+# 回归门禁:parser 冻结核心 fixtures 回归全绿才允许打包(门槛见 DEVELOPER_GUIDE.md),
 # 失败即中止(parser_regression 输出差异详情)。npm test 全量较慢,发布前按需
 # 手动执行(cd nest_gateway && npm test),不内置门禁。
 # ---------------------------------------------------------------------------
@@ -436,20 +431,6 @@ fi
 find "${TMP}" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "${TMP}" -type f \( -name "*.pyc" -o -name "*.tsbuildinfo" -o -name "*.js.map" \) -delete
 
-# 打包期净化:替换开发机痕迹(erxx 为开发者本机目录名示例),
-# 出现于 .env.example、设置页文案、路径注释、check 提示等处。
-# dist 必须一并净化:运行时加载的是 dist,设置页文案(字符串字面量)若保留
-# erxx 会展示开发机路径,且与净化后的 src 行为不一致(tsc removeComments
-# 已剥离注释,dist 内 erxx 均为文案字符串,替换安全)。
-# 排除第三方/产物目录(node_modules/runtime/venv/.git/coverage):
-# 体积大扫描慢(每发 1-2min),且其内容非开发痕迹,误改写有破坏风险
-grep -rlI "erxx" "${TMP}" \
-  --exclude-dir=node_modules --exclude-dir=runtime --exclude-dir=venv \
-  --exclude-dir=.git --exclude-dir=coverage \
-  2>/dev/null | while read -r f; do
-  sed -i 's/erxx/comfy_output/g' "${f}"
-done
-
 # runtime venv 的 pyvenv.cfg 含构建机绝对路径(Windows 用户名/目录结构,
 # 隐私泄露点);痕迹扫描排除 runtime/ 且不查 .cfg 后缀,必须此处定点脱敏。
 # home 失效后 venv python 无法启动(No Python at ...),由部署端启动脚本
@@ -460,13 +441,15 @@ if [[ -f "${PYVENV}" ]]; then
 fi
 
 # 剥离代码注释中的开发过程痕迹(如"2026-08-03 对话决策"等 AI 协作记录);
-# 排除目录同上,避免扫描 node_modules 全树
+# 排除目录同上,避免扫描 node_modules 全树。
+# 管道尾部必须 || true:set -o pipefail 下"零命中"会让 grep 返回 1,
+# 而净化后的公开树正是零命中——否则打包在此静默终止(实测踩中)。
 grep -rlI "对话决策" "${TMP}" \
   --exclude-dir=node_modules --exclude-dir=runtime --exclude-dir=venv \
   --exclude-dir=.git --exclude-dir=dist --exclude-dir=coverage \
   2>/dev/null | while read -r f; do
   sed -i -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+对话决策//g; s/对话决策//g' "${f}"
-done
+done || true
 
 # 版本标识文件(唯一识别串 BUILD_ID + 溯源字段;增量更新按 BUILD_ID/BUILD_SEQ 判新旧)
 DIRTY=""
@@ -564,11 +547,11 @@ names = z.namelist()
 checked = [n for n in names if not n.startswith(
     ('nest_gateway/node_modules/', 'runtime/'))]
 forbidden = [
-    'docs/', 'AGENTS.md', 'API_DESIGN.md', 'IMPLEMENTATION_LOG.md',
-    'MIGRATION_CHANGELOG.md', 'oc_prompting.md', 'opencode.json',
+    'docs/', 'API_DESIGN.md', 'IMPLEMENTATION_LOG.md',
+    'MIGRATION_CHANGELOG.md',
     'todo.md', 'UI_UPDATE_GUIDE.md', 'benchmarks/', 'tools/', 'tests/',
     'workflow_automatic/', 'comfy_generator/', 'err_log/',
-    '.superpowers/', '.vscode/', '.opencode/',
+    '.vscode/',
     'nest_gateway/src/', 'nest_gateway/test/',
     'nest_gateway/scripts/collect_fixtures.py',
     'nest_gateway/scripts/dedupe_batch_images.py',

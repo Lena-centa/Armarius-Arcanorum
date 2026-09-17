@@ -155,6 +155,12 @@ interface StatsDoc {
     image_name?: string;
   };
   created_date?: string;
+  /**
+   * 捕获时间(parser 产出的 record.captured_at,Date 或 ISO 字符串)。
+   * 物化到 stats_docs.captured_at 列——该列是统计页排序键并带降序索引,
+   * 此前未写入导致列与索引全废(100% NULL)。
+   */
+  captured_at?: unknown;
   model?: { base_model?: string };
   loras?: { names?: string[] };
   prompts?: StatsDocPrompts;
@@ -294,6 +300,7 @@ export function buildStatsCacheDocument(record: StatsDoc): Record<string, unknow
       image_name: fileInfo.image_name,
     },
     created_date: record.created_date,
+    captured_at: record.captured_at,
     model: {
       base_model: record.model?.base_model,
     },
@@ -377,6 +384,7 @@ export function statsDocFromBatchDoc(
           sha256?: string;
         };
         source?: { instance_id?: string; asset_id?: string };
+        captured_at?: unknown;
       }>;
     }).images ?? [];
   const out: Array<{ resolvedPath: string; doc: Record<string, unknown> }> = [];
@@ -394,6 +402,9 @@ export function statsDocFromBatchDoc(
           image_name: fileInfo.image_name,
         },
         created_date: (doc as { created_date?: string }).created_date,
+        // 图像级时间优先(一行一图,统计页排序键),回退批级 captured_at
+        captured_at:
+          img.captured_at ?? (doc as { captured_at?: unknown }).captured_at,
         model: {
           base_model: (doc as { model?: { base_model?: string } }).model?.base_model,
         },

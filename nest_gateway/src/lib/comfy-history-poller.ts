@@ -184,8 +184,10 @@ export class ComfyHistoryPoller {
    *   4. parseHistoryImages 解析;跳过未完成(completed !== true)与
    *      已处理(prompt_id 命中 processed)条目
    *   5. 对每个新完成 prompt:逐 output 图片 resolve 路径并加入缓冲
-   *      (仅 type=output;resolve 失败的路径静默跳过,由 sync 扫描兜底);
-   *      prompt_id 立即加入 processed(防同轮重复),再持久化
+   *      (仅 type=output)。**有输出图却全部 resolve 失败时保留未处理**——
+   *      挂载抖动/文件未落地时若照样置 processed,该次出图会被永久漏录;
+   *      无输出图的条目(无可入库内容)直接视为已处理。
+   *      prompt_id 先入 processed(防同轮重复)再持久化
    *   6. finally 复位 running(即使抛错也释放单飞锁)
    *
    * 边界:单条 persistProcessed 失败只告警不中断(唯一索引兜底幂等);
@@ -219,11 +221,9 @@ export class ComfyHistoryPoller {
         if (!item.completed || this.processed.has(item.prompt_id)) {
           continue;
         }
-        newIds += 1;
-        for (const image of item.images) {
-          if (image.type !== 'output') {
-            continue;
-          }
+        const outputs = item.images.filter((image) => image.type === 'output');
+        let resolved = 0;
+        for (const image of outputs) {
           const path = resolveComfyImagePath(
             image,
             this.options.scanRoot,
@@ -231,11 +231,22 @@ export class ComfyHistoryPoller {
           );
           if (path) {
             this.options.buffer.add(path);
+            resolved += 1;
           }
+        }
+        // 有输出图却一张都定位不到(共享目录挂载延迟/文件尚未落地):
+        // 绝不置 processed —— 否则该次出图被永久漏录;保留未处理状态,
+        // 下轮 /history 仍会返回该条并重新探测。
+        if (resolved === 0 && outputs.length > 0) {
+          this.logger.warn(
+            `comfy history: prompt ${item.prompt_id} 的输出文件暂不可达,保留待下轮重试`,
+          );
+          continue;
         }
         // 先入内存集合再持久化:即使持久化失败,本进程内也不会重复入队
         this.processed.add(item.prompt_id);
         await this.persistProcessed(item.prompt_id);
+        newIds += 1;
       }
       if (newIds > 0) {
         this.logger.log(

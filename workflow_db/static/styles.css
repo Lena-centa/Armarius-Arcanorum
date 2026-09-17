@@ -578,10 +578,11 @@ body.preview-open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  padding: 0 11px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -589,7 +590,14 @@ body.preview-open {
 }
 .search-top-btn:hover {
   color: var(--text);
-  background: var(--row-hover);
+  background: var(--surface);
+  border-color: var(--line);
+}
+.search-top-btn.is-active,
+.search-top-btn[aria-expanded="true"] {
+  border-color: var(--line-strong);
+  background: var(--surface-container-highest);
+  color: var(--text);
 }
 .search-top-btn[hidden] {
   display: none;
@@ -628,7 +636,7 @@ body.preview-open {
   min-height: 22px;
   height: 22px;
   max-height: 120px;
-  padding: 2px 0;
+  padding: 0;
   border: 0;
   outline: none;
   appearance: none;
@@ -648,6 +656,10 @@ body.preview-open {
 }
 .search-top-field textarea::placeholder {
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 22px;
 }
 
 /* 高级搜索按钮:胶囊内右侧图标钮,激活态以文字色标识 */
@@ -670,6 +682,9 @@ body.preview-open {
 .search-adv-btn[aria-expanded="true"] {
   color: var(--text);
   background: var(--row-hover);
+}
+.search-adv-btn.has-filter {
+  color: var(--accent);
 }
 
 /* 高级搜索面板与搜索历史面板:紧凑卡片外观 */
@@ -1154,6 +1169,44 @@ body.preview-open {
 .combo-option.is-active {
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+/* 候选三态着色(远端存在性)。设计取向:存在=零额外装饰(多数情形不制造噪声),
+   缺失/未知只做降饱和 + 左侧细色条,不铺底色 —— 避免长列表被颜色淹没。
+   颜色不单独承载语义:缺失项另有 .combo-option-flag 文字标记。 */
+.combo-option.is-missing {
+  color: var(--muted);
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+
+.combo-option.is-missing:hover,
+.combo-option.is-missing.is-active {
+  background: var(--accent-soft);
+  color: var(--muted);
+}
+
+.combo-option.is-unknown {
+  color: var(--muted);
+  box-shadow: inset 2px 0 0 var(--border);
+}
+
+.combo-option.is-unknown:hover,
+.combo-option.is-unknown.is-active {
+  background: var(--accent-soft);
+  color: var(--muted);
+}
+
+/* 缺失项的文字标记(右对齐、小字、弱化),不依赖颜色单独传达状态 */
+.combo-option-flag {
+  float: right;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--danger);
+  opacity: 0.85;
+}
+
+.combo-option.is-unknown .combo-option-flag {
+  color: var(--muted);
 }
 
 .combo-empty {
@@ -2754,6 +2807,29 @@ textarea {
   display: none;
 }
 
+/* 预览弹层头部:备注输入(与「★ 收藏」同一行;保存即收藏到未分类) */
+.preview-fav-note {
+  width: 200px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.preview-fav-note::placeholder {
+  color: var(--muted);
+}
+
+.image-preview-actions .ghost-btn.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
 /* 关闭按钮:独立浮在弹窗右上角,不混入操作按钮流 */
 .preview-close-btn {
   position: absolute;
@@ -3205,6 +3281,230 @@ textarea {
   font-size: 11px;
 }
 
+.detail-lineage {
+  border-left: 3px solid #2f7d61 !important;
+}
+
+.lineage-group-label {
+  margin: 7px 0 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.lineage-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.lineage-thumb {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--surface-container);
+  cursor: pointer;
+}
+
+.lineage-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lineage-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+}
+
+.lineage-row-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineage-row-main span,
+.lineage-unresolved {
+  color: var(--muted);
+}
+
+/* 参考图喂到的 ControlNet(多 CN 各引不同图时区分归属) */
+.lineage-downstream {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineage-unresolved {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line-soft);
+  font-size: 10px;
+}
+
+.lineage-manual {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.7fr) minmax(120px, 1.3fr);
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.lineage-manual select,
+.lineage-manual input {
+  min-width: 0;
+  height: 30px;
+}
+
+.lineage-search-results {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+}
+
+.lineage-search-result {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: 5px 7px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lineage-compare-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #111;
+}
+
+.lineage-compare-base,
+.lineage-compare-overlay img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.lineage-compare-overlay {
+  position: absolute;
+  inset: 0 auto 0 0;
+  overflow: hidden;
+  border-right: 2px solid #fff;
+}
+
+.lineage-compare-overlay img {
+  width: calc(100vw - 420px);
+  max-width: none;
+}
+
+.lineage-compare-slider {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  width: calc(100% - 32px);
+}
+
+.lineage-compare-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.lineage-compare-mask-switch {
+  position: absolute;
+  bottom: 44px;
+  right: 16px;
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.lineage-compare-mask-switch .ghost-btn {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.lineage-compare-mask-switch .ghost-btn.is-active {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.lineage-compare-caption {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  max-width: calc(100% - 160px);
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 遮罩范围叠加层(对比视图「遮罩」模式):按工作流参数绘制,不依赖 mask 源文件 */
+.lineage-compare-mask-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.lineage-compare-mask-rect {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 0, 0, 0.35);
+  mix-blend-mode: multiply;
+}
+
+.lineage-compare-mask-alpha {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lineage-compare-mask-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  opacity: 0.85;
+}
+
+.lineage-compare-mask-note {
+  position: absolute;
+  bottom: 88px;
+  left: 16px;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .generate-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
@@ -3320,6 +3620,60 @@ textarea {
   letter-spacing: 0.02em;
 }
 
+/* 来源身份:绝对路径为主(中字重),哈希以低字重弱色补后。
+   顶栏那处是只读块、两行(路径 / 浅色小字哈希);来源卡里是同行内联。 */
+.source-identity,
+.generate-source-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  text-align: left;
+}
+
+.source-identity-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.source-identity-hash {
+  flex: none;
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 顶栏只读身份块:两行,路径在上、浅色小字 sha 在下 */
+.source-identity {
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.source-identity .source-identity-path {
+  max-width: 100%;
+}
+
+.source-identity .source-identity-hash {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.source-identity.is-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 覆盖 .generate-source-meta > div 的两列网格:身份行只有一列 */
+.generate-source-meta > .generate-source-identity {
+  display: flex;
+  grid-template-columns: none;
+}
+
 .generate-grid,
 .generate-prompt-stack,
 .stack-list {
@@ -3389,6 +3743,19 @@ textarea {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 重放填表:记录引用的文件不在远端 ComfyUI 模型列表中 */
+.generate-remote-missing {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--chip-line);
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
   font-size: 12px;
   font-weight: 500;
 }
@@ -3464,6 +3831,88 @@ textarea {
 .generate-source-bar {
   align-items: end;
   background: var(--panel);
+}
+
+/* 预检结果面板(生成页来源栏下方):只读核对,零副作用 */
+.generate-preflight {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.generate-preflight[hidden] {
+  display: none;
+}
+
+.preflight-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.preflight-summary {
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: auto;
+}
+
+.preflight-verdict {
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--muted);
+}
+
+.preflight-verdict.is-bad {
+  color: var(--danger);
+}
+
+.preflight-verdict.is-warn {
+  color: var(--warning);
+}
+
+.preflight-verdict.is-ok {
+  color: var(--text);
+}
+
+.preflight-row {
+  display: grid;
+  grid-template-columns: 96px 120px minmax(0, 1fr) 72px;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.preflight-group {
+  color: var(--muted);
+}
+
+.preflight-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.preflight-flag {
+  text-align: right;
+  color: var(--muted);
+}
+
+.preflight-row.is-missing .preflight-flag {
+  color: var(--danger);
+}
+
+.preflight-row.is-empty .preflight-flag {
+  color: var(--warning);
 }
 
 .generate-source-bar .field.wide {
@@ -4465,6 +4914,49 @@ textarea {
   line-height: 1.7;
 }
 
+/* 2026-09-11:生成页「输入图」区块 —— 引用输入框 + 图库换图 */
+.generate-image-ref .generate-card-title {
+  font-weight: 500;
+}
+
+.generate-image-picker {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.generate-image-picker .generate-row {
+  align-items: end;
+}
+
+.generate-image-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.generate-image-result {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generate-image-result:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .generate-param-chip {
   display: inline-block;
   margin: 1px 2px 1px 0;
@@ -5227,6 +5719,40 @@ textarea {
 }
 .thumb-wrap .thumb-link {
   margin-top: 0;
+}
+
+/* 主列表 i2i 角标:贴在缩略图右上角,存在 i2i 血缘才出现(空元素不占位)。
+   两种形态:实心 = 本图是图生图产物(有父图);描边 = 本图被当作图生图源。
+   底色用半透明黑 + 白字,保证压在任意缩略图上都可读。 */
+.lineage-mark {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  line-height: 0;
+  pointer-events: none;
+}
+.lineage-mark:empty {
+  display: none;
+}
+.lineage-mark svg {
+  display: block;
+}
+.lineage-mark rect {
+  fill: rgba(0, 0, 0, 0.62);
+  stroke: rgba(255, 255, 255, 0.3);
+}
+.lineage-mark text {
+  fill: rgba(255, 255, 255, 0.92);
+  font: 700 8px/1 var(--font-mono);
+  letter-spacing: 0.2px;
+}
+.lineage-mark.is-product rect {
+  fill: var(--accent);
+  stroke: transparent;
+}
+.lineage-mark.is-product text {
+  fill: var(--accent-contrast);
 }
 
 /* 星标(收藏卡片):幽灵态常显,收藏态填充高亮 */

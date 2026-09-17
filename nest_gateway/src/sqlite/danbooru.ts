@@ -6,14 +6,17 @@
  *   - 查表键层双向归一:输入 `blonde hair`(空格,用户 prompt 主流写法)
  *     归一为词表规范形 `blonde_hair`(下划线);展示/回填由前端用空格形式;
  *   - 转义:前缀联想用范围扫描(tag >= ? AND tag < ?),天然免疫
- *     `_`/`%`/`\` LIKE 通配符(tag 名 85.6% 含下划线);
- *   - 多语言:tag_alias 表(103,571 个去重小写别名,含 CJK)先于字面查询,
+ *     `_`/`%`/`\` LIKE 通配符(tag 名约九成含下划线,2026-09-07 实测 90.2%);
+ *   - 多语言:tag_alias 表(初始构建 103,571 去重小写别名;经
+ *     --patch-characters 扩展后 2026-09-07 实测 672,068,含 CJK)先于字面查询,
  *     精确命中 → 规范 tag;CJK 前缀作为二级兜底;
  *   - 单 tag 索引:LLR 邻居(edges)与 GNN 最近邻(tag_gnn_nn)RRF 融合,
  *     按语义类别分组返回(tag_category 表:角色/背景/环境/特征子类/构图);
  *     角色/条目特征走 wiki_traits 配图投票(权威),共现词形规则兜底。
  *
- * 资产由 tools/build_danbooru_db.py 一次性构建;文件缺失时 openDanbooru
+ * 资产由 utils/build_danbooru_db.py 一次性构建(patch 系工具
+ * patch_character_profile.py / rebuild_danbooru_alias.py 增量扩展);
+ * 文件缺失时 openDanbooru
  * 返回 null,调用方(controller)对空响应,前端空即隐藏 —— 全程静默降级。
  */
 import { existsSync } from 'fs';
@@ -510,8 +513,9 @@ function resolveTagIds(
   // ---- 括号不敏感兜底:输入剥括号后查 name_pc 列 ----
   // 词表 tag 名带消歧括号(如 hina_(blue_archive)),而句子/窗口输入经
   // 词切分后括号丢失(`hina blue archive`)——name_pc(构建期剥括号列)
-  // 让两条路径在括号维度上对齐。112,283 个 tag 剥括号后仅 5 对冲突,
-  // 冲突时 character 类型优先、count 决胜。
+  // 让两条路径在括号维度上对齐。初始库 112,283 tag 剥括号仅 5 对冲突;
+  // --patch-characters 扩展后(430,347 tag)2026-09-07 实测 30 组/60 个,
+  // 仍占 0.014%,剥括号对齐依旧安全。冲突时 character 类型优先、count 决胜。
   const pcKey = key.replace(/[()]/g, '');
   if (pcKey && pcKey !== key) {
     try {

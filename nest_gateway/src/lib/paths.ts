@@ -1,8 +1,8 @@
 /**
  * 跨平台路径工具。
  *
- * 历史数据在 WSL 时代入库,file.resolved_path 为 `/mnt/d/erxx/...` 格式;
- * Windows 原生运行时代码解析该路径会得到 `C:\mnt\d\erxx\...`(不存在)。
+ * 历史数据在 WSL 时代入库,file.resolved_path 为 `/mnt/d/comfy_output/...` 格式;
+ * Windows 原生运行时代码解析该路径会得到 `C:\mnt\d\comfy_output\...`(不存在)。
  * 所有基于 resolved_path 的文件系统访问都应经过 firstAccessiblePath,
  * 按 [原路径, 归一化路径, windows_path] 顺序取第一个真实存在的文件。
  *
@@ -38,14 +38,14 @@ export function normalizePathForPlatform(p: string): string {
     return p;
   }
   if (process.platform === 'win32') {
-    // /mnt/d/erxx/... -> D:\erxx\...
+    // /mnt/d/comfy_output/... -> D:\comfy_output\...
     const m = /^\/mnt\/([a-zA-Z])\/(.*)$/.exec(p);
     if (m) {
       return `${m[1].toUpperCase()}:\\${m[2].replace(/\//g, '\\')}`;
     }
     return p;
   }
-  // D:\erxx\... 或 D:/erxx/... -> /mnt/d/erxx/...
+  // D:\comfy_output\... 或 D:/comfy_output/... -> /mnt/d/comfy_output/...
   const m = /^([a-zA-Z]):[\\/](.*)$/.exec(p);
   if (m) {
     return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
@@ -124,7 +124,7 @@ export function isAccessiblePath(p: string): boolean {
  *
  * 用途:原图下发(GW-09)的库记录投毒防线 —— file.resolved_path 来自库,
  * 被篡改记录可能携带扫描根之外的任意路径;相对路径比较法避免字符串前缀
- * 误判(如 D:\erxx2 是 D:\erxx 的前缀但并非其子目录)。
+ * 误判(如 D:\comfy_output2 是 D:\comfy_output 的前缀但并非其子目录)。
  * 注:win32 下 path.relative 对盘符与路径分量大小写不敏感。
  */
 export function isPathUnderRoots(target: string, roots: string[]): boolean {

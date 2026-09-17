@@ -62,7 +62,7 @@ class Program
 
 $Launchers = @(
     @{ Name = 'deploy.exe';       Ps1 = 'deploy.ps1';       DefaultArgs = '' },
-    @{ Name = 'start.exe';       Ps1 = 'start.ps1';       DefaultArgs = 'start' }
+    @{ Name = 'start.exe'; Ps1 = 'start.ps1'; DefaultArgs = 'start' }
 )
 
 foreach ($l in $Launchers) {

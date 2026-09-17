@@ -17,6 +17,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
+  Favorites,
+  FavoritesSchema,
   Images,
   ImagesSchema,
   StatsDocs,
@@ -30,6 +32,7 @@ import { WorkersModule } from '../../workers/workers.module';
 import { OrchestrationService } from './orchestration.service';
 import { BackupService } from './backup.service';
 import { OrchestrationController } from './orchestration.controller';
+import { LineageModule } from '../lineage/lineage.module';
 
 /**
  * @Module 元数据:
@@ -45,9 +48,12 @@ import { OrchestrationController } from './orchestration.controller';
       { name: StatsDocs.name, schema: StatsDocsSchema },
       { name: StatsSummaries.name, schema: StatsSummariesSchema },
       { name: RecipeGroups.name, schema: RecipeGroupsSchema },
+      // 收藏集合:tag 推荐的人工偏好采集(反馈半环)从这里读
+      { name: Favorites.name, schema: FavoritesSchema },
     ]),
     // ParseWorkerService 由 WorkersModule 提供(消除与 ParseModule 的循环依赖)
     WorkersModule,
+    LineageModule,
   ],
   controllers: [OrchestrationController],
   providers: [OrchestrationService, BackupService],

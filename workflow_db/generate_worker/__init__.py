@@ -1,7 +1,7 @@
 """generate_worker: long-running Python worker for NestJS gateway.
 
 Protocol spec: docs/contracts/parse_worker_protocol.md (shared framework)
-Method list: docs/archive/NEST_GATEWAY_MIGRATION_PLAN.md Phase 3 task 1
+Method list: Nest 网关迁移 Phase 3 task 1
 
 Run as:
     python -m workflow_db.generate_worker

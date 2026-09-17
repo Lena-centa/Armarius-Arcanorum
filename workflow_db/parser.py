@@ -70,7 +70,7 @@ def parse_image(path: Path, scan_root: Path | None = None) -> dict[str, Any]:
 
     samplers = collect_sampler_settings(graph)
     prompt_summary = collect_prompt_groups(graph, samplers)
-    latent = collect_latent_settings(graph, samplers)
+    latent = collect_latent_settings(graph, samplers, image_info=image_info)
     model = collect_model_settings(graph, samplers)
     loras = collect_lora_settings(graph, model)
     file_info = build_file_info(path, resolved_path, relative_path, file_stats, image_info)
@@ -186,15 +186,29 @@ def resolve_input_value(graph: WorkflowGraph, value: Any, depth: int = 0) -> Any
         if output_index == 0 and inputs:
             first_key = next(iter(inputs))
             return resolve_input_value(graph, inputs[first_key], depth + 1)
+        if graph.workflow:
+            wn = graph.workflow_node(node_id)
+            if wn:
+                wv = wn.get("widgets_values")
+                if isinstance(wv, list) and wv:
+                    first = wv[0]
+                    if isinstance(first, (int, float, str)) and not isinstance(first, bool):
+                        return first
 
     if class_type == "Text Multiline":
         return inputs.get("text", "")
 
     if class_type == "Text Concatenate":
-        left = resolve_input_value(graph, inputs.get("text_a"), depth + 1)
-        right = resolve_input_value(graph, inputs.get("text_b"), depth + 1)
-        delimiter = inputs.get("delimiter", "")
-        return f"{left}{delimiter}{right}".strip()
+        delimiter = str(inputs.get("delimiter") or "")
+        parts = []
+        for key in ("text_a", "text_b", "text_c", "text_d"):
+            if key in inputs and inputs[key] is not None:
+                val = resolve_input_value(graph, inputs.get(key), depth + 1)
+                if isinstance(val, str) and val != "":
+                    parts.append(val)
+                elif isinstance(val, (int, float)) and not isinstance(val, bool):
+                    parts.append(str(val))
+        return delimiter.join(parts).strip()
 
     if class_type == "Text to Conditioning":
         return resolve_input_value(graph, inputs.get("text"), depth + 1)
@@ -202,7 +216,12 @@ def resolve_input_value(graph: WorkflowGraph, value: Any, depth: int = 0) -> Any
     if class_type == "CLIPTextEncode":
         return inputs.get("text", "")
 
-    # 转换器注入的模板端口占位节点(tools/ui_workflow_to_prompt.py):
+    if "showanything" in class_type.lower() or "showtext" in class_type.lower():
+        for key in ("anything", "text", "string"):
+            if key in inputs:
+                return resolve_input_value(graph, inputs.get(key), depth + 1)
+
+    # 转换器注入的模板端口占位节点:
     # 无可解析值,原样返回连线值(不展开为 dict,避免污染 loader/base_model)
     if class_type in {"__blueprint_input", "__blueprint_output", "__external_node"}:
         return value
@@ -313,14 +332,23 @@ def collect_prompt_groups(graph: WorkflowGraph, samplers: list[dict[str, Any]] |
         sampler_positive: list[dict[str, Any]] = []
         sampler_negative: list[dict[str, Any]] = []
 
+        effective_inputs = dict(inputs)
+        if "guider" in inputs and "positive" not in inputs and "negative" not in inputs:
+            g_link = normalize_link(inputs.get("guider"))
+            if g_link:
+                g_inputs = graph.node_inputs(g_link[0])
+                for k in ("positive", "negative", "model"):
+                    if k in g_inputs:
+                        effective_inputs[k] = g_inputs[k]
+
         for field_name, sampler_bucket, overall_bucket, seen, use_model_fallback in (
             ("positive", sampler_positive, positive, seen_positive, True),
             ("negative", sampler_negative, negative, seen_negative, False),
         ):
-            value = inputs.get(field_name)
+            value = effective_inputs.get(field_name)
             entries = collect_prompt_entries_from_value(graph, value, branch_label=field_name)
             if not entries and use_model_fallback:
-                model_link = normalize_link(inputs.get("model"))
+                model_link = normalize_link(effective_inputs.get("model"))
                 if model_link:
                     entries = collect_prompt_entries_from_link(graph, model_link[0], branch_label=field_name)
 
@@ -382,6 +410,16 @@ def collect_prompt_entries_from_link(
 
     if class_type == "Text to Conditioning":
         return collect_prompt_entries_from_value(graph, inputs.get("text"), visited, branch_label=branch_label)
+
+    if "showanything" in class_type.lower() or "showtext" in class_type.lower():
+        for key in ("anything", "text", "string"):
+            if key in inputs:
+                return collect_prompt_entries_from_value(graph, inputs.get(key), visited, branch_label=branch_label)
+
+    if "bus" in class_type.lower():
+        for key in (branch_label, "positive", "negative", "text", "string"):
+            if key and key in inputs:
+                return collect_prompt_entries_from_value(graph, inputs.get(key), visited, branch_label=branch_label)
 
     if class_type == "ConditioningCombine":
         return [
@@ -660,14 +698,62 @@ def collect_sampler_settings(graph: WorkflowGraph) -> list[dict[str, Any]]:
             "denoise": resolve_input_value(graph, inputs.get("denoise")),
             "noise_seed": resolve_input_value(graph, inputs.get("noise_seed")),
         }
+
+        # 组合式采样器(SamplerCustomAdvanced / SamplerCustom):参数分散在 noise, guider, sampler, sigmas
+        if class_type in ("SamplerCustomAdvanced", "SamplerCustom"):
+            noise_link = normalize_link(inputs.get("noise"))
+            guider_link = normalize_link(inputs.get("guider"))
+            sampler_link = normalize_link(inputs.get("sampler"))
+            sigmas_link = normalize_link(inputs.get("sigmas"))
+
+            if noise_link:
+                noise_inputs = graph.node_inputs(noise_link[0])
+                for k in ("noise_seed", "seed"):
+                    if k in noise_inputs:
+                        sampler["seed"] = resolve_input_value(graph, noise_inputs[k])
+                        if sampler["seed"] not in (None, "", {}):
+                            break
+                seed_src = seed_source_info(graph, noise_inputs.get("noise_seed") or noise_inputs.get("seed"))
+                if not seed_src:
+                    seed_src = {"node_id": noise_link[0], "node_type": graph.node_type(noise_link[0])}
+                sampler["seed_source"] = seed_src
+
+            if guider_link:
+                guider_inputs = graph.node_inputs(guider_link[0])
+                for k in ("cfg", "guidance"):
+                    if k in guider_inputs:
+                        val = resolve_input_value(graph, guider_inputs[k])
+                        if val not in (None, "", {}):
+                            sampler["cfg"] = val
+                            break
+
+            if sampler_link:
+                s_inputs = graph.node_inputs(sampler_link[0])
+                if "sampler_name" in s_inputs:
+                    val = resolve_input_value(graph, s_inputs["sampler_name"])
+                    if val not in (None, "", {}):
+                        sampler["sampler_name"] = val
+
+            if sigmas_link:
+                sig_inputs = graph.node_inputs(sigmas_link[0])
+                for k in ("steps", "scheduler", "denoise"):
+                    if k in sig_inputs:
+                        val = resolve_input_value(graph, sig_inputs[k])
+                        if val not in (None, "", {}):
+                            sampler[k] = val
+
         seed_source = seed_source_info(graph, inputs.get("seed"))
-        if seed_source:
+        if seed_source and "seed_source" not in sampler:
             sampler["seed_source"] = seed_source
         samplers.append({key: value for key, value in sampler.items() if value not in (None, "", {})})
     return samplers
 
 
-def collect_latent_settings(graph: WorkflowGraph, samplers: list[dict[str, Any]]) -> dict[str, Any]:
+def collect_latent_settings(
+    graph: WorkflowGraph,
+    samplers: list[dict[str, Any]],
+    image_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     for sampler in samplers:
         node_id = sampler.get("node_id")
@@ -687,6 +773,27 @@ def collect_latent_settings(graph: WorkflowGraph, samplers: list[dict[str, Any]]
             "empty_latent_width": resolve_input_value(graph, latent_inputs.get("empty_latent_width")),
             "empty_latent_height": resolve_input_value(graph, latent_inputs.get("empty_latent_height")),
         }
+        # 若当前节点无尺寸字段且存在上游 samples 连线(如 LatentUpscaleBy),沿 samples 向上追溯初始尺寸
+        if candidate.get("width") is None and candidate.get("empty_latent_width") is None:
+            curr_id = source_id
+            for _ in range(8):
+                curr_inputs = graph.node_inputs(curr_id)
+                up_link = normalize_link(curr_inputs.get("samples") or curr_inputs.get("latent") or curr_inputs.get("latent_image"))
+                if not up_link:
+                    break
+                curr_id = up_link[0]
+                up_inputs = graph.node_inputs(curr_id)
+                w = resolve_input_value(graph, up_inputs.get("width")) or resolve_input_value(graph, up_inputs.get("empty_latent_width"))
+                h = resolve_input_value(graph, up_inputs.get("height")) or resolve_input_value(graph, up_inputs.get("empty_latent_height"))
+                b = resolve_input_value(graph, up_inputs.get("batch_size"))
+                if w is not None:
+                    candidate["width"] = w
+                if h is not None:
+                    candidate["height"] = h
+                if b is not None:
+                    candidate["batch_size"] = b
+                if w is not None or h is not None:
+                    break
         candidates.append({key: value for key, value in candidate.items() if value not in (None, "", {})})
 
     if candidates:
@@ -696,6 +803,35 @@ def collect_latent_settings(graph: WorkflowGraph, samplers: list[dict[str, Any]]
             primary["width"] = primary["empty_latent_width"]
         if "height" not in primary and "empty_latent_height" in primary:
             primary["height"] = primary["empty_latent_height"]
+
+        # 若首个候选(如 VAEEncode / 未解析连线)无标量整数尺寸,尝试从后续候选补充尺寸
+        if not isinstance(primary.get("width"), int) or not isinstance(primary.get("height"), int):
+            for other in candidates[1:]:
+                ow = other.get("width") or other.get("empty_latent_width")
+                oh = other.get("height") or other.get("empty_latent_height")
+                if isinstance(ow, int) and isinstance(oh, int):
+                    primary["width"] = ow
+                    primary["height"] = oh
+                    break
+
+        # 若仍缺失标量尺寸且调用方提供了图像信息(如 VAEEncode 图生图/未解析 Get Image Size),以图像真实分辨率兜底
+        if (not isinstance(primary.get("width"), int) or not isinstance(primary.get("height"), int)) and image_info:
+            iw = image_info.get("width")
+            ih = image_info.get("height")
+            if isinstance(iw, int) and isinstance(ih, int):
+                primary["width"] = iw
+                primary["height"] = ih
+
+        # batch_size 兜底:尝试从候选借用,否则默认 1
+        if not isinstance(primary.get("batch_size"), int):
+            for other in candidates:
+                ob = other.get("batch_size")
+                if isinstance(ob, int):
+                    primary["batch_size"] = ob
+                    break
+            if not isinstance(primary.get("batch_size"), int):
+                primary["batch_size"] = 1
+
         return primary
 
     return {}
@@ -717,17 +853,55 @@ def collect_model_settings(graph: WorkflowGraph, samplers: list[dict[str, Any]])
                 record[field] = value
         if len(record) > 2:
             model_nodes.append(record)
-        if not base_model and any(name in inputs for name in ("ckpt_name", "unet_name", "model_name")):
-            checkpoint_node_id = node_id
-            base_model = record.get("ckpt_name") or record.get("unet_name") or record.get("model_name")
 
     model_source_id = None
+    # 策略 1: 优先沿 sampler 的 model 连线上溯,准确定位生成所使用的真实 Checkpoint / UNet 节点
     for sampler in samplers:
         inputs = graph.node_inputs(sampler.get("node_id"))
         link = normalize_link(inputs.get("model"))
+        if not link and "guider" in inputs:
+            g_link = normalize_link(inputs.get("guider"))
+            if g_link:
+                link = normalize_link(graph.node_inputs(g_link[0]).get("model"))
         if link:
-            model_source_id = link[0]
+            if not model_source_id:
+                model_source_id = link[0]
+            curr = link[0]
+            for _ in range(12):
+                if not curr:
+                    break
+                cnode = graph.prompt.get(curr, {})
+                cinputs = cnode.get("inputs", {})
+                ckpt = resolve_input_value(graph, cinputs.get("ckpt_name")) or resolve_input_value(graph, cinputs.get("unet_name"))
+                if isinstance(ckpt, str) and ckpt not in ("", "None"):
+                    base_model = ckpt
+                    checkpoint_node_id = curr
+                    break
+                up = normalize_link(cinputs.get("model") or cinputs.get("unet"))
+                curr = up[0] if up else None
+        if base_model:
             break
+
+    # 策略 2: 兜底扫描 model_nodes(优先匹配 ckpt_name / unet_name 扩散基模)
+    if not base_model:
+        for rec in model_nodes:
+            ckpt = rec.get("ckpt_name") or rec.get("unet_name")
+            if ckpt:
+                base_model = ckpt
+                checkpoint_node_id = rec["node_id"]
+                break
+
+    # 策略 3: 若无明确 ckpt/unet,取 model_name(严格排除 YOLO 检测器、SAM 分割、超分、人脸等辅助模型)
+    if not base_model:
+        for rec in model_nodes:
+            ct = rec.get("node_type", "").lower()
+            if any(t in ct for t in ("detector", "samloader", "sam_", "upscale", "segm", "yolo", "face", "depth", "florence", "facerestore")):
+                continue
+            m = rec.get("model_name")
+            if m:
+                base_model = m
+                checkpoint_node_id = rec["node_id"]
+                break
 
     return {
         "base_model": base_model,

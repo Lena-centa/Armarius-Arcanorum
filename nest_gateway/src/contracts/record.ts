@@ -124,7 +124,7 @@ export const WorkflowInfoSchema = z.object({
 // 注意:与 images.schema.ts 的 LinkValue(mongoose 侧)语义对应,但两处定义
 // 实际存在差异(本文件含 array 分支、无 null;mongoose 侧含 null、无 array;
 // docs/contracts/record.schema.json 的 linkValue 为 number|string|object 三态)。
-// 变更任一契约需按 AGENTS.md 门槛三端同步 + fixtures 回归。
+// 变更任一契约需三端同步 + fixtures 回归(门槛见 DEVELOPER_GUIDE.md)。
 export const LinkValueSchema = z.union([
   z.number(),
   z.string(),

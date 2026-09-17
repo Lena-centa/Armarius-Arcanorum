@@ -7,7 +7,8 @@
  *   2. WorkersModule(提供 GenerateWorkerService 与 ParseWorkerService,
  *      二者实际 provider 由 workers 模块统一管理)
  *
- * 导出:GenerateWorkerService 供其他模块(AppModule / 需要 submit 的场景)复用。
+ * 导出:GenerateWorkerService 供其他模块(AppModule / 需要 submit 的场景)
+ * 复用;ComfyProxyHookService 供 comfy-proxy 模块的 /prompt 提交钩子注入。
  * 注意:ParseWorkerService 由 WorkersModule 提供,此处不重复注册,
  * 与 ParseModule 的依赖关系完全解耦。
  */
@@ -23,7 +24,10 @@ import {
 } from '../../schemas';
 import { WorkersModule } from '../../workers/workers.module';
 import { GenerateWorkerService } from '../../workers/generate-worker.service';
+import { ComfyProxyHookService } from './comfy-proxy-hook.service';
 import { GenerateController } from './generate.controller';
+import { ReplayInputsService } from './replay-inputs.service';
+import { LineageModule } from '../lineage/lineage.module';
 
 /**
  * @Module 元数据:
@@ -40,9 +44,10 @@ import { GenerateController } from './generate.controller';
       { name: RecipeGroups.name, schema: RecipeGroupsSchema },
     ]),
     WorkersModule,
+    LineageModule,
   ],
   controllers: [GenerateController],
-  providers: [GenerateWorkerService],
-  exports: [GenerateWorkerService],
+  providers: [GenerateWorkerService, ReplayInputsService, ComfyProxyHookService],
+  exports: [GenerateWorkerService, ComfyProxyHookService],
 })
 export class GenerateModule {}

@@ -120,6 +120,44 @@ export interface ThumbResult {
   data: Buffer;
 }
 
+/**
+ * 候选来源图喂到的 ControlNet 应用(worker 侧 image_lineage 产出)。
+ * 多 CN 各引不同参考图时,同一张图上可有多个 apply,用于区分
+ * "这张参考图喂给了哪个 CN 模型 / 强度多少"。
+ */
+export interface ImageLineageDownstream {
+  apply_node_id: string;
+  apply_type: string;
+  loader_node_id?: string | null;
+  control_net_name?: string | null;
+  strength?: number | string | null;
+}
+
+export interface ImageLineageCandidate {
+  relation_type: 'i2i' | 'controlnet' | 'mask' | 'reference' | 'auxiliary';
+  raw_ref: string;
+  source_node_id: string;
+  source_node_type: string;
+  source_content_sha256?: string | null;
+  active: boolean;
+  source_unavailable?: boolean;
+  /** 仅 controlnet 关系携带(见 ImageLineageDownstream) */
+  downstream?: ImageLineageDownstream[];
+}
+
+/**
+ * 提交负载里的一个图像 loader 引用(worker 侧 image_loader_refs 产出)。
+ * raw_ref 已剥净尾注,与库内 filename/image_name 同口径;raw_ref_field 给出
+ * 持有该值的输入字段名(回填改写时按此字段写回,与提取侧同源)。
+ */
+export interface ImageLoaderRef {
+  node_id: string;
+  node_type: string;
+  raw_ref: string;
+  raw_ref_field?: string;
+  content_sha256?: string | null;
+}
+
 /** Display-only enrichment wrapper. Diagnostics/provenance are never persisted. */
 export interface EnrichmentResult {
   effective_record: Record<string, unknown>;
@@ -427,13 +465,35 @@ export class ParseWorkerSupervisor {
     prompts: string[],
     batchKey?: string,
     topK = 10,
+    preferredTags?: string[],
   ): Promise<Record<string, unknown>> {
     const resp = (await this.call('suggest_tags', {
       prompts,
       batch_key: batchKey ?? '',
       top_k: topK,
+      // 人工偏好(收藏图派生的 tag 文本):网关采集后传入,worker 侧加权。
+      // 缺省不下发该键 → worker 视为无偏好,行为与加权前一致。
+      ...(preferredTags?.length ? { preferred_tags: preferredTags } : {}),
     })) as Record<string, unknown> | null;
     return resp ?? { enabled: false };
+  }
+
+  async extractImageLineage(metadata: {
+    raw_prompt?: unknown;
+    raw_workflow?: unknown;
+    raw_novelai?: unknown;
+  }): Promise<ImageLineageCandidate[]> {
+    const resp = (await this.call('extract_image_lineage', metadata)) as {
+      candidates?: ImageLineageCandidate[];
+    } | null;
+    return Array.isArray(resp?.candidates) ? resp.candidates : [];
+  }
+
+  async imageLoaderRefs(rawPrompt: unknown): Promise<ImageLoaderRef[]> {
+    const resp = (await this.call('image_loader_refs', {
+      raw_prompt: rawPrompt,
+    })) as { refs?: ImageLoaderRef[] } | null;
+    return Array.isArray(resp?.refs) ? resp.refs : [];
   }
 
   // ------------------------------------------------------------ dispatch

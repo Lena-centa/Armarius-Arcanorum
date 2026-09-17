@@ -6,14 +6,14 @@
  * 外置到代码树外的用户目录后,安装目录可随时整体替换,数据天然延续;
  * .env 也藏入其中,对用户默认不可见(缺失时由网关自动生成)。
  *
- * 解析优先级(TS / Python / bash / PowerShell 四处实现必须逐字段对齐,
- * 参见 docs/analysis/data-dir-externalization-feasibility.md §5.1):
+ * 解析优先级(TS / Python / bash / PowerShell 四处实现必须逐字段对齐):
  *   1. WORKFLOW_DATA_DIR 环境变量(绝对路径;win32 接受 /mnt/x/... 形式)
  *      注意:该变量只能来自进程环境,**不能写进 .env** —— .env 本身就
  *      存放在数据目录里,定位数据目录先于读取 .env(引导鸡生蛋约束)
- *   2. win32:%LOCALAPPDATA%\workflow_db
- *   3. 其余平台:$XDG_DATA_HOME/workflow_db(须绝对路径),
- *      回退 ~/.local/share/workflow_db
+ *   2. win32:%LOCALAPPDATA%\armarius_arcanorum(旧目录 workflow_db 存在时
+ *      平滑回退/兼容,见 LEGACY_DATA_DIR_NAME)
+ *   3. 其余平台:$XDG_DATA_HOME/armarius_arcanorum(须绝对路径),
+ *      回退 ~/.local/share/armarius_arcanorum
  */
 import { homedir } from 'os';
 import { isAbsolute, join } from 'path';

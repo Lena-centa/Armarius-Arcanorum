@@ -5,7 +5,7 @@
  * 尚未加载 .env —— 生效路径识别必须直接解析旧 env 文件,不能依赖
  * process.env 里已有业务配置(OS 显式注入的环境变量仍最优先)。
  *
- * 迁移规则(docs/analysis/data-dir-externalization-feasibility.md §5.5):
+ * 迁移规则:
  *   - 触发条件:新数据目录无主库 && 旧 <repo>/data 有主库 &&
  *     有效主库路径等于旧默认位(未配置 / 配置为空 / 显式写的正是旧默认位)
  *   - 有效路径指向其他自定义位置时跳过搬库(尊重显式意图),
@@ -391,8 +391,9 @@ export function runLegacyDataMigration(repoRoot: string = REPO_ROOT): MigrationR
         `  ${targetDb}`,
         '',
         '原 gray_workflow.sqlite3(-wal/-shm)已改名为 *.migrated 保留在此,',
-        '确认新版运行正常后可整目录删除;回滚旧版代码前请先阅读',
-        'docs/analysis/data-dir-externalization-feasibility.md §5.5。',
+        '确认新版运行正常后可整目录删除。若要回滚旧版代码:把这里的 *.migrated',
+        '改回原名(去掉 .migrated 后缀),再启动旧版即可(新版主库留在用户数据目录,',
+        '互不影响)。',
       ].join('\n'),
       'utf8',
     );

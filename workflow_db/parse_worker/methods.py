@@ -21,7 +21,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageFile, ImageOps
+
+# 允许加载轻微截断或非标截断的图像，避免 make_thumb 抛出
+# "OSError: image file is truncated" 导致网关缩略图端点返回 500。
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from .protocol import (
     ERR_IMAGE_NOT_FOUND,
@@ -83,6 +87,14 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "tag_suggest module not found; ensure workflow_db package is on sys.path"
+    ) from exc
+
+try:
+    from workflow_db.image_lineage import extract_image_lineage as _extract_image_lineage
+    from workflow_db.image_lineage import image_loader_refs as _image_loader_refs
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        "image_lineage module not found; ensure workflow_db package is on sys.path"
     ) from exc
 
 
@@ -175,16 +187,40 @@ def suggest_tags(params: dict[str, Any]) -> dict[str, Any]:
     """组推荐(需求 2):batch 的 prompt tag 组作为多输入 → GNN 组推荐。
 
     资产/依赖缺失时返回 {"enabled": false}(静默降级,不阻断 ingest)。
+
+    `preferred_tags`(可选):用户收藏过图片的 tag 文本列表(词表规范形),
+    由网关从 favorites 采集后传入,用于偏好加权(数据飞轮反馈半环)。
+    缺失/非数组时视为无偏好 —— 默认行为与加权前完全一致。
     """
     prompts = params.get("prompts")
     if not isinstance(prompts, list):
         raise ProtocolError(INVALID_PARAMS, "prompts must be a list of strings")
     top_k = params.get("top_k", 10)
+    preferred_raw = params.get("preferred_tags")
+    preferred = (
+        {str(tag) for tag in preferred_raw if isinstance(tag, str)}
+        if isinstance(preferred_raw, list)
+        else None
+    )
     tags = _extract_prompt_tags(prompts)
-    result = _tag_suggest(tags, top_k=int(top_k))
+    result = _tag_suggest(tags, top_k=int(top_k), preferred_tags=preferred)
     if result is None:
         return {"enabled": False}
     return {"enabled": True, **result}
+
+
+def extract_image_lineage(params: dict[str, Any]) -> dict[str, Any]:
+    """Classify embedded source-image references without touching storage."""
+    return _extract_image_lineage(
+        params.get("raw_prompt"),
+        params.get("raw_workflow"),
+        params.get("raw_novelai"),
+    )
+
+
+def image_loader_refs(params: dict[str, Any]) -> dict[str, Any]:
+    """List image-loader references of a submitted prompt (pre-submit liveness)."""
+    return {"refs": _image_loader_refs(params.get("raw_prompt"))}
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +329,8 @@ METHODS: dict[str, Any] = {
     "parse_image": parse_image,
     "enrich_record": enrich_record,
     "suggest_tags": suggest_tags,
+    "extract_image_lineage": extract_image_lineage,
+    "image_loader_refs": image_loader_refs,
     "make_thumb": make_thumb,
     "ping": ping,
 }

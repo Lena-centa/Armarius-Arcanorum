@@ -14,7 +14,7 @@ ComfyUI 生态节点定义解析工具库（开发者离线工具，不随应用
 - 全生态状态矩阵：每个索引 class_type 均标记 parser known、通用生成候选、
   待探针、动态 mapping 未解析、抓取失败或仅索引等状态
 
-产出喂给 parser 受控扩展流程（AGENTS.md）与 `docs/parser/KNOWN_GAPS.md` §1.4 持续扫描约定。
+产出喂给 parser 受控扩展流程与 `docs/parser/KNOWN_GAPS.md` §1.4 持续扫描约定。
 
 红线：只读扩展源码做静态分析，不执行任何第三方扩展代码。
 
@@ -27,7 +27,7 @@ ComfyUI 生态节点定义解析工具库（开发者离线工具，不随应用
 的指纹，并只对本轮重新提取的仓库失效，避免定向扩展使既有语义退化为 `opaque`。
 
 静态接口/指纹命中不等价于 parser 已正确产出 record。只有合成图探针或真实
-workflow fixture 证明字段损失，才进入 AGENTS.md 的受控扩展流程。
+workflow fixture 证明字段损失，才进入 parser 的受控扩展流程。
 
 覆盖报告分别统计 definition、behavior、path、record projection；任何单一维度
 都不能代表节点已被完整理解。

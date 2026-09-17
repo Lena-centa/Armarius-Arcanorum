@@ -411,6 +411,19 @@ function iso(v: unknown): string | null {
   return JSON.stringify(v);
 }
 
+/**
+ * 数值列物化:number 直接取;数字字符串转 number;
+ * 其余(引用壳对象/数组/空值)一律 null —— 未被解析的引用壳不能污染数值列。
+ */
+function num(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const parsed = Number(v);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // 写原语
 // ---------------------------------------------------------------------------
@@ -472,6 +485,16 @@ export function upsertBatchAndChildren(
         ? 1
         : 0;
 
+    // 采样参数物化:取第一个 sampler 的 steps/cfg(统计页 AVG 的数据源)。
+    // 未解析的引用壳(对象)一律落 null —— 值语义由 num() 把关。
+    const samplerList = Array.isArray(batch.samplers) ? batch.samplers : [];
+    const firstSampler = samplerList.find(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === 'object',
+    );
+    const samplerSteps = num(firstSampler?.steps);
+    const samplerCfg = num(firstSampler?.cfg);
+
     // INSERT OR REPLACE:主键 batch_key 冲突时整行替换,
     // 物化列与 doc_json 永远来自同一份 batch,无半新半旧状态。
     // 显式指定 rowid=旧值:REPLACE 默认会给新行分配新 rowid,会让
@@ -479,8 +502,9 @@ export function upsertBatchAndChildren(
     db.prepare(
       `INSERT OR REPLACE INTO batches(
         rowid, batch_key, captured_at, created_date, created_hour, created_weekday,
-        recipe_key, batch_count, base_model, has_positive, search_text, doc_json)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        recipe_key, batch_count, base_model, has_positive, sampler_steps, sampler_cfg,
+        search_text, doc_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       oldRow?.rid ?? null,
       batch.batchKey,
@@ -492,6 +516,8 @@ export function upsertBatchAndChildren(
       batch.batchCount,
       baseModel,
       hasPositive,
+      samplerSteps,
+      samplerCfg,
       searchText,
       batch.docJson,
     );
@@ -624,8 +650,8 @@ export function upsertStatsDoc(
  *
  * 字段映射:file.resolved_path → resolvedPath(主键);
  * prompts.search_text → searchText;model.base_model → baseModel;
- * has_parsed_workflow 转布尔;capturedAt 置 null
- * (stats_docs 表该列仅作展示,来源文档无此字段)。
+ * has_parsed_workflow 转布尔;captured_at 原样透传(物化到
+ * stats_docs.captured_at 列——该列是统计页排序键并带降序索引)。
  */
 export function statsDocWriteFromCache(
   cacheDoc: Record<string, unknown>,
@@ -643,7 +669,7 @@ export function statsDocWriteFromCache(
       (cacheDoc.model as { base_model?: unknown } | undefined)?.base_model ??
       null,
     searchText: prompts.search_text ?? null,
-    capturedAt: null,
+    capturedAt: cacheDoc.captured_at ?? null,
     loraNames: [...new Set((loras.names ?? []).filter(Boolean))].sort(),
     docJson: JSON.stringify(cacheDoc),
   };

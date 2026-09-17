@@ -64,6 +64,10 @@ import { batchBySha256, distinctStatsBaseModels, distinctStatsLoras } from '../.
 import { archiveGeneratedOutputs } from '../../lib/archive';
 import { isEnginePending } from '../../lib/engine';
 import { RequireAuth } from '../../common/auth';
+import { LineageService } from '../lineage/lineage.service';
+import { ReplayInputsService } from './replay-inputs.service';
+import type { ReplayInputCapture } from './replay-inputs.service';
+import { registerSourceMaterials } from '../../lib/source-materials';
 
 /**
  * 通用延时工具:返回一个在 ms 毫秒后 resolve 的 Promise。
@@ -127,6 +131,8 @@ export class GenerateController {
     private readonly statsDocsModel: Model<StatsDocsDocument>,
     @InjectModel(RecipeGroups.name)
     private readonly recipeGroupModel: Model<RecipeGroupsDocument>,
+    private readonly lineage?: LineageService,
+    private readonly replayInputs?: ReplayInputsService,
   ) {
     // 从全局配置(.env)读取三个开关;缺省分别为:扫描根空串、不双写、不切读
     this.scanRoot = this.config.get<string>('scanRoot') ?? '';
@@ -388,6 +394,8 @@ export class GenerateController {
     }
     // payload:提交给 ComfyUI 的完整 API 负载;queued:submit 的排队结果
     let payload: { client_id?: string } = {};
+    // 探活阶段发现的"仅存于 ComfyUI"的输入素材(任务完成后取回归档)
+    let captures: ReplayInputCapture[] = [];
     let queued: {
       prompt_id?: string;
       number?: number;
@@ -432,6 +440,41 @@ export class GenerateController {
       throw this.mapWorkerError(err);
     }
 
+    // 第 4.5 步:输入素材探活与回填(Upload-if-missing)。
+    // 时点选在 apply_replay_edits 之后、入队之前:此时 payload 已是最终
+    // 提交内容,且尚未占用 ComfyUI 队列——缺图若拖到提交后才暴露,
+    // ComfyUI 会抛文件未找到,而任务已经排进队列。
+    // 探活是辅助步骤:未注入该服务(纯远程部署)或探测异常都只跳过,
+    // 不因辅助能力缺失阻断生成;唯一硬失败是"确实缺图且库内也找不到"。
+    if (this.replayInputs) {
+      const prompt = (payload as { prompt?: Record<string, unknown> }).prompt;
+      if (prompt) {
+        try {
+          const preflight = await this.replayInputs.ensureInputs(prompt);
+          // 仅存于 ComfyUI 的素材留待任务完成后取回归档:此时它们仍在
+          // ComfyUI 侧,归档后才有可解析的父图记录
+          captures = preflight.capture;
+          if (preflight.missing.length) {
+            const refs = preflight.missing
+              .map((item) => item.raw_ref)
+              .slice(0, 5)
+              .join(', ');
+            throw new BadRequestException(
+              `源图不可用(ComfyUI 与图库均无):${refs}`,
+            );
+          }
+        } catch (err) {
+          // 缺图是明确的不可生成,直接上抛;其余异常视为探测不可用 → 跳过
+          if (err instanceof BadRequestException) throw err;
+          this.logger.warn(
+            `replay input preflight skipped: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    }
+
     // 必须在 POST /prompt 之前预留 watcher 槽位。旧顺序是 ComfyUI 已接受
     // 任务后才返回 429,客户端重试会制造重复生成且首个任务无人归档。
     if (activeWatchCount >= MAX_ACTIVE_WATCHES) {
@@ -454,7 +497,7 @@ export class GenerateController {
     // 异步归档:提交后轮询 ComfyUI history,completed 后归档。
     const promptId = queued.prompt_id;
     if (promptId) {
-      void this.watchAndArchive(promptId).finally(() => {
+      void this.watchAndArchive(promptId, captures).finally(() => {
         activeWatchCount -= 1;
       });
     } else {
@@ -618,7 +661,10 @@ export class GenerateController {
    * @param promptId 提交任务时 ComfyUI 返回的 prompt_id
    * @returns 无值;异常不会外抛,统一记 warn 日志
    */
-  private async watchAndArchive(promptId: string): Promise<void> {
+  private async watchAndArchive(
+    promptId: string,
+    captures: ReplayInputCapture[] = [],
+  ): Promise<void> {
     // P1#15 双归档竞态:同一 promptId 已在归档中(或已完成)则直接跳过,
     // 避免重复提交导致的两个轮询循环对同一任务重复归档
     if (
@@ -630,7 +676,7 @@ export class GenerateController {
     // 先登记"进行中",再进循环;循环结束(无论成败)必清理登记
     this.inFlightPromptIds.add(promptId);
     try {
-      await this.watchAndArchiveLoop(promptId);
+      await this.watchAndArchiveLoop(promptId, captures);
     } catch (err) {
       // 内层循环自身已捕获大部分异常,这里兜底记录致命错误
       this.logger.warn(
@@ -641,7 +687,10 @@ export class GenerateController {
     }
   }
 
-  private async watchAndArchiveLoop(promptId: string): Promise<void> {
+  private async watchAndArchiveLoop(
+    promptId: string,
+    captures: ReplayInputCapture[] = [],
+  ): Promise<void> {
     const maxAttempts = 900; // 最多轮询 30 分钟(每2秒)
     this.logger.log(`watchAndArchive started for ${promptId}`);
 
@@ -708,11 +757,48 @@ export class GenerateController {
           this.config.get<{ instance_id: string; base_url: string }>(
             'instance',
           ),
+          this.lineage
+            ? (record) => this.lineage!.refreshRecord(record).then(() => undefined)
+            : undefined,
         );
 
         this.logger.log(
           `archive result for ${promptId}: archived=${archiveResult.archived} batches=${archiveResult.batches} paths=${JSON.stringify(archiveResult.paths)}`,
         );
+
+        // 输入素材归档:把"仅存于 ComfyUI"的源图取回登记为库内记录。
+        // 必须在输出归档之后——素材记录要能被本轮已写入的生成图血缘边
+        // 解析到(replaceAutoEdges 先落边,素材后到则由 resolvePendingForImage
+        // 在登记后回补解析;两条路都在 refreshRecord 里覆盖)。
+        // 放在输出归档之后还有一个原因:素材取回失败不该影响生成图入库。
+        if (captures.length) {
+          try {
+            const materialPaths = await this.replayInputs!.captureMaterials(captures);
+            if (materialPaths.length) {
+              const registered = await registerSourceMaterials(
+                this.sqliteDb,
+                materialPaths,
+                (path: string, scanRoot: string) => this.parseFn(path, scanRoot),
+                this.scanRoot,
+              );
+              this.logger.log(
+                `source materials for ${promptId}: captured=${materialPaths.length} registered=${registered.registered} skipped=${registered.skipped}`,
+              );
+              // 素材刚入库:用它回补此前未解析的血缘边(挂起边按新到文件名/
+              // 内容哈希重解析)。素材登记走的是独立路径,不经 refreshRecord,
+              // 因此这里必须显式触发一次。
+              for (const path of materialPaths) {
+                await this.lineage?.resolvePendingForPath?.(path);
+              }
+            }
+          } catch (err) {
+            this.logger.warn(
+              `source material capture skipped for ${promptId}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
 
         // 归档成功(至少 1 条):登记进 archivedPromptIds 防止重复归档
         if (archiveResult.archived > 0) {

@@ -4,7 +4,7 @@ The build inputs have independent licenses. Before redistributing generated
 assets, update and retain danbooru/ASSET_LICENSES.md; the repository MIT
 license does not replace dataset licenses.
 
-One-shot offline build from D:/gnn assets. Produces six tables:
+One-shot offline build from <dnndev> assets. Produces six tables:
 
   tags(id, name, tag_type, count, has_wiki)   -- 112,283 rows; id = lexicographic
                                                 tag index (matches edges/embed ids)
@@ -20,7 +20,7 @@ One-shot offline build from D:/gnn assets. Produces six tables:
                                                 environment/hair_color/hair_style/
                                                 eyes/clothing/accessories/
                                                 expression/body/action/other),
-                                                from D:/gnn p9_semantic.py
+                                                from <dnndev> p9_semantic.py
   wiki_traits(tag_id, trait_id, vote,         -- wiki example-image (!post #id)
               vote_official)                     tag votes per wiki page title;
                                                 vote_official counts images with
@@ -29,15 +29,15 @@ One-shot offline build from D:/gnn assets. Produces six tables:
                                                 authoritative character-traits
                                                 part of the tag UI)
 
-Row-order traps (verified against D:/gnn sources):
+Row-order traps (verified against <dnndev> sources):
   * edges.parquet / embed_gnn.npy use the LEXICOGRAPHIC tag index
     (tag2id = {t:i for i,t in enumerate(np.sort(vocab.tag))}).
   * vocab.parquet itself is NOT lexicographic and tag_texts.parquet follows
     the vocab FILE order. All alias rows are joined by tag name, never by
     row number.
 
-Usage (run with the D:/gnn venv python, which has numpy/pandas/pyarrow):
-  python utils/build_danbooru_db.py [--src D:/gnn/out] [--out danbooru/danbooru.sqlite3]
+Usage (run with the <dnndev> venv python, which has numpy/pandas/pyarrow):
+  python utils/build_danbooru_db.py [--src <dnndev>/out] [--out danbooru/danbooru.sqlite3]
                                     [--skip-gnn] [--block 4096]
   python utils/build_danbooru_db.py --patch-semantic   # add tag_category +
                                                        # wiki_traits to an
@@ -89,7 +89,7 @@ def insert_semantic(
     src: Path,
     start: float,
 ) -> float:
-    """Insert tag_category + wiki_traits from D:/gnn p9 parquets.
+    """Insert tag_category + wiki_traits from <dnndev> p9 parquets.
 
     Rows whose tag names are missing from name2id are skipped (p9 reads the
     same vocab, so drops should be zero; parquet columns use tag NAMES to
@@ -642,7 +642,7 @@ def build(src: Path, out: Path, skip_gnn: bool, block: int) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--src", default="D:/gnn/out", help="D:/gnn asset directory")
+    p.add_argument("--src", default="gnn-out", help="GNN asset directory (exported parquet/npy)")
     p.add_argument(
         "--out", default=str(Path(__file__).resolve().parent.parent / "danbooru" / "danbooru.sqlite3")
     )
@@ -661,7 +661,7 @@ def main() -> None:
     )
     p.add_argument(
         "--snapshot",
-        default="D:/gnn/posts-snapshot.parquet",
+        default="posts-snapshot.parquet",
         help="danbooru posts snapshot (typed tag columns)",
     )
     args = p.parse_args()

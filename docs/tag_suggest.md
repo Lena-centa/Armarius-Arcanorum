@@ -1,6 +1,6 @@
 # Danbooru Tag 补全参考
 
-基于 `D:/gnn` 训练完成的 danbooru tag GNN（test AUC 0.959）与共现图资产，为工作流搜索
+基于 `<dnndev>` 训练完成的 danbooru tag GNN（test AUC 0.959）与共现图资产，为工作流搜索
 提供三条能力线。**网关运行时零 ML、零嵌入常驻**——联想/单 tag 索引纯 SQLite 查表，
 组推荐在扫描入库时由 worker 预计算落库。
 
@@ -52,12 +52,12 @@
 ## 资产构建（一次性）
 
 ```bash
-# 需 D:/gnn venv（numpy/pandas/pyarrow）；产出 danbooru/danbooru.sqlite3 + npy 资产
-<dnndev>/python.exe utils/build_danbooru_db.py [--src D:/gnn/out] [--block 4096]
+# 需 <dnndev> venv（numpy/pandas/pyarrow）；产出 danbooru/danbooru.sqlite3 + npy 资产
+<dnndev>/python.exe utils/build_danbooru_db.py [--src <dnndev>/out] [--block 4096]
 
 # 存量库补语义两表（P9，不重建 GNN 邻居表，幂等）：
-#   前置 D:/gnn/scripts/p9_semantic.py 产出 tag_category/wiki_traits parquet
-<dnndev>/python.exe utils/build_danbooru_db.py --patch-semantic [--src D:/gnn/out]
+#   前置 <dnndev>/scripts/p9_semantic.py 产出 tag_category/wiki_traits parquet
+<dnndev>/python.exe utils/build_danbooru_db.py --patch-semantic [--src <dnndev>/out]
 
 # 角色索引完整性扩展（2026-08-19）：词表(112,283)按 p0 规则只保留 count≥200
 # 的角色，导致 rossi_(arknights) 等新角色不在词表。本命令从 posts-snapshot
@@ -65,7 +65,7 @@
 # (offset id 112283+，GNN 资产不变)，并补 name_pc 列(剥括号键)、wiki 别名
 # (wiki_extra other_names)、tag_category、新标题的 wiki_traits。幂等可重跑。
 <dnndev>/python.exe utils/build_danbooru_db.py --patch-characters \
-    [--snapshot D:/gnn/out/posts-snapshot.parquet]
+    [--snapshot <dnndev>/out/posts-snapshot.parquet]
 ```
 
 产出六表 + 两份 npy：
@@ -147,7 +147,7 @@ WITH_DANBOORU=1 ./release.sh          # 或 ./release.sh --with-danbooru
 
 - **支持**：vocab 内 112,283 个 tag 的嵌入查询；`embed_gnn.npy` 与 checkpoint 前向逐位一致。
 - **不支持**：vocab 外新 tag（SVD 特征不可生成，实测零向量/噪声）；text 特征输入（in_dim=128≠768）。
-  新 tag 支持需 text 特征重训（二期，D:/gnn 侧）。
+  新 tag 支持需 text 特征重训（二期，<dnndev> 侧）。
 - **质量定位**：GNN 在"同作品社区"召回极佳（IP→角色），LLR 在属性族更干净；单 tag 索引用
   LLR+GNN RRF 融合互补。GNN 单独做 tag 推荐弱于 LLR（r50 1.2% vs 22.4%），故不作为唯一排序依据。
 - **裁剪**：模型 131k 参数无可裁；嵌入/边表裁剪在查表化后无实际收益，不做。

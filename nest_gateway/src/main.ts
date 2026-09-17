@@ -22,6 +22,11 @@ import {
   runLegacyDataMigration,
 } from './bootstrap/data-dir-migration';
 import { buildGatewayOrigins } from './common/cors/origins';
+import { gzipMiddleware } from './common/http/gzip.middleware';
+import {
+  attachComfyWsBridge,
+  parseUpstream,
+} from './common/comfy-proxy/comfy-proxy';
 import { ParseWorkerService } from './workers/parse-worker.service';
 import { GenerateWorkerService } from './workers/generate-worker.service';
 
@@ -40,8 +45,9 @@ async function bootstrap() {
   console.log(`[data-dir] legacy migration: ${migration.status} (${migration.reason})`);
   ensureEnvFile();
 
-  // 创建 Nest 应用(根模块见 app.module.ts)
-  const app = await NestFactory.create(AppModule);
+  // 创建 Nest 应用(根模块见 app.module.ts)。rawBody: body-parser 解析过的
+  // 请求体保留原始字节(comfy-proxy 需要原样重建转发体;对其余路由无行为影响)
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // 读取启动相关配置(带默认值兜底,缺 .env 也能正常启动)
   const configService = app.get(ConfigService);
@@ -55,7 +61,23 @@ async function bootstrap() {
     console.warn(
       `[security] WARNING: gateway is bound to ${bindHost} (non-loopback) without an auth token. ` +
         'Endpoints without @RequireAuth are reachable from the network. ' +
+        'The /comfy/* passthrough also exposes the configured ComfyUI instance (which has weak auth of its own). ' +
         'Set ARMARIUS_AUTH_TOKEN (or WORKFLOW_DB_AUTH_TOKEN) in .env to enforce token auth.',
+    );
+  }
+
+  // 内嵌 ComfyUI 的 WS 升级桥(生成页内嵌模式;HTTP 部分走 comfy-proxy 模块
+  // 的 /comfy/* 路由)。COMFYUI_BASE_URL 非法时只告警不阻断启动——网关其余
+  // 功能不依赖它。须在 listen() 前挂载,使升级事件自服务启动即可用
+  const comfyuiBaseUrl = configService.get<string>(
+    'comfyuiBaseUrl',
+    'http://127.0.0.1:8188',
+  );
+  try {
+    attachComfyWsBridge(app.getHttpServer(), parseUpstream(comfyuiBaseUrl));
+  } catch (err) {
+    console.warn(
+      `[comfy-proxy] COMFYUI_BASE_URL invalid (${comfyuiBaseUrl}), embedded ComfyUI proxy disabled: ${String(err)}`,
     );
   }
 
@@ -98,6 +120,13 @@ async function bootstrap() {
     },
     credentials: false,
   });
+
+  // 响应压缩:JSON/文本响应超过 1KB 时 gzip(自研零依赖中间件,只用 node:zlib;
+  // 详见 common/http/gzip.middleware.ts 的适用边界——SSE/流式/已编码响应自动透传)。
+  // 位置:在 CORS 之后注册,保证预检与实际响应走同一管道。
+  app.use(
+    gzipMiddleware({ onError: (message) => console.warn(`[gzip] ${message}`) }),
+  );
 
   // SIGTERM/SIGINT 时触发 onApplicationShutdown(回收 worker、SQLite checkpoint)
   app.enableShutdownHooks();

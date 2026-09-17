@@ -10,7 +10,7 @@
  *
  * 验收口径参照 docs/contracts/parse_worker_protocol.md §9.3
  *   (51 个 fixtures byte-equal,时间字段除外)
- * 与 docs/archive/NEST_GATEWAY_MIGRATION_PLAN.md Phase 2
+ * 与 Nest 网关迁移 Phase 2
  *   (50 条 fixtures 全绿):
  *   "51 个 fixtures 喂 parse worker,与旧 FastAPI 输出 byte-equal(时间字段除外)"
  *
